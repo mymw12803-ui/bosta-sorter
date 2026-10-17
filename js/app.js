@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     searchQuery: '',
     currentPage: 1,
     pageSize: 50,
+    currentFilteredPages: [],
     generatedPdfBlob: null,
     generatedPdfUrl: null,
     isProcessing: false
@@ -80,6 +81,21 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsTableBody: document.getElementById('results-table-body'),
     showingCount: document.getElementById('showing-count'),
     totalCount: document.getElementById('total-count'),
+
+    // Batch Export Buttons & Counts
+    batchCountKids: document.getElementById('batch-count-kids'),
+    batchCountWomen: document.getElementById('batch-count-women'),
+    batchCountOther: document.getElementById('batch-count-other'),
+    batchCountMulti: document.getElementById('batch-count-multi'),
+    downloadKidsBtn: document.getElementById('download-kids-btn'),
+    downloadWomenBtn: document.getElementById('download-women-btn'),
+    downloadOtherBtn: document.getElementById('download-other-btn'),
+    downloadMultiBtn: document.getElementById('download-multi-btn'),
+
+    // Filter Export Button & Counts
+    downloadFilteredBtn: document.getElementById('download-filtered-btn'),
+    filteredDownloadCount: document.getElementById('filtered-download-count'),
+    totalDownloadCount: document.getElementById('total-download-count'),
 
     // Download buttons
     downloadTopBtn: document.getElementById('download-top-btn'),
@@ -377,6 +393,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     elements.statSinglePercent.textContent = `${singlePercent}% من الشحنات`;
     elements.statMultiPercent.textContent = `${multiPercent}% من الشحنات`;
+
+    // Batch Category Counters
+    const countKids = state.sortedPages.filter(p => p.category === 'kids').length;
+    const countWomen = state.sortedPages.filter(p => p.category === 'women').length;
+    const countOther = state.sortedPages.filter(p => p.category === 'other').length;
+    const countMulti = state.sortedPages.filter(p => p.category === 'multi').length;
+
+    if (elements.batchCountKids) elements.batchCountKids.textContent = `${countKids} بوليصة`;
+    if (elements.batchCountWomen) elements.batchCountWomen.textContent = `${countWomen} بوليصة`;
+    if (elements.batchCountOther) elements.batchCountOther.textContent = `${countOther} بوليصة`;
+    if (elements.batchCountMulti) elements.batchCountMulti.textContent = `${countMulti} بوليصة`;
+
+    if (elements.downloadKidsBtn) elements.downloadKidsBtn.disabled = countKids === 0;
+    if (elements.downloadWomenBtn) elements.downloadWomenBtn.disabled = countWomen === 0;
+    if (elements.downloadOtherBtn) elements.downloadOtherBtn.disabled = countOther === 0;
+    if (elements.downloadMultiBtn) elements.downloadMultiBtn.disabled = countMulti === 0;
+
+    if (elements.totalDownloadCount) elements.totalDownloadCount.textContent = total;
   }
 
   /**
@@ -386,12 +420,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const query = ArabicUtils.normalizeText(state.searchQuery);
     
     const filtered = state.sortedPages.filter(item => {
-      // Tab Filter
+      // Category & Tab Filter
+      if (state.activeFilter === 'kids' && item.category !== 'kids') return false;
+      if (state.activeFilter === 'women' && item.category !== 'women') return false;
+      if (state.activeFilter === 'other' && item.category !== 'other') return false;
+      if (state.activeFilter === 'multi' && item.category !== 'multi') return false;
       if (state.activeFilter === 'single' && (item.isMultiProduct || !item.hasRecognizedDescription)) return false;
-      if (state.activeFilter === 'multi' && !item.isMultiProduct) return false;
       if (state.activeFilter === 'unknown' && item.hasRecognizedDescription) return false;
 
-      // Search Query
+      // Quick Search Query (colors e.g. "اسود", "كشمير", keywords, SKU, tracking, city)
       if (query) {
         const matchesModel = item.normalizedModel.includes(query) || item.modelName.includes(query);
         const matchesColor = item.normalizedColor.includes(query) || item.color.includes(query);
@@ -399,22 +436,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const matchesSku = item.sku.toLowerCase().includes(query);
         const matchesTracking = item.trackingNumber.toLowerCase().includes(query);
         const matchesCity = item.city.includes(query);
+        const matchesRaw = (item.rawDescription || '').toLowerCase().includes(query);
 
-        return matchesModel || matchesColor || matchesSize || matchesSku || matchesTracking || matchesCity;
+        return matchesModel || matchesColor || matchesSize || matchesSku || matchesTracking || matchesCity || matchesRaw;
       }
 
       return true;
     });
 
+    state.currentFilteredPages = filtered;
     elements.showingCount.textContent = filtered.length;
     elements.totalCount.textContent = state.sortedPages.length;
+
+    if (elements.filteredDownloadCount) {
+      elements.filteredDownloadCount.textContent = filtered.length;
+    }
+    if (elements.downloadFilteredBtn) {
+      elements.downloadFilteredBtn.disabled = filtered.length === 0;
+    }
 
     elements.resultsTableBody.innerHTML = '';
 
     if (filtered.length === 0) {
       elements.resultsTableBody.innerHTML = `
         <tr>
-          <td colspan="7" class="px-6 py-12 text-center text-slate-400">
+          <td colspan="8" class="px-6 py-12 text-center text-slate-400">
             <svg class="w-12 h-12 mx-auto mb-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -430,6 +476,10 @@ document.addEventListener('DOMContentLoaded', () => {
     filtered.forEach((item) => {
       const tr = document.createElement('tr');
       tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors text-sm';
+
+      // Category Badge
+      const catMeta = ArabicUtils.getCategoryMeta(item.category);
+      const categoryBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${catMeta.badgeClass}">${catMeta.label}</span>`;
 
       // Badge for Single vs Multi
       let orderTypeBadge = '';
@@ -460,11 +510,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       tr.innerHTML = `
-        <td class="px-4 py-3 font-mono font-bold text-sky-400">
+        <td class="px-3 py-3 font-mono font-bold text-sky-400">
           #${item.newPageNumber}
         </td>
-        <td class="px-4 py-3 font-mono text-slate-400">
+        <td class="px-3 py-3 font-mono text-slate-400">
           ${item.originalPageNumber}
+        </td>
+        <td class="px-4 py-3 whitespace-nowrap">
+          ${categoryBadge}
         </td>
         <td class="px-4 py-3">
           <div class="font-medium text-slate-100 flex items-center gap-2">
@@ -485,7 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <td class="px-4 py-3">
           ${skuBadge}
         </td>
-        <td class="px-4 py-3 text-center">
+        <td class="px-3 py-3 text-center">
           <button class="view-detail-btn p-1.5 rounded-lg hover:bg-slate-700 text-slate-300 hover:text-white transition" title="معاينة النص المستخرج من البوليصة" data-original-page="${item.originalPageNumber}">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -608,22 +661,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /**
-   * Final PDF Download Action
+   * Universal Batch & Filtered PDF Export Action
+   * Resizes all pages to thermal dimensions (75x125mm) with zero data loss & intact vector barcodes
    */
-  async function downloadSortedPDF() {
-    if (!state.sortedPages || state.sortedPages.length === 0 || !state.pdfArrayBuffer) {
-      showToast('يرجى معالجة ملف البوليصات أولاً.', 'error');
+  async function exportBatchPDF(pagesToExport, filenamePrefix) {
+    if (!pagesToExport || pagesToExport.length === 0 || !state.pdfArrayBuffer) {
+      showToast('لا توجد شحنات مطابقة لتصديرها كملف PDF.', 'error');
       return;
     }
 
     elements.downloadTopBtn.disabled = true;
     elements.downloadStickyBtn.disabled = true;
+    if (elements.downloadFilteredBtn) elements.downloadFilteredBtn.disabled = true;
     elements.progressSection.classList.remove('hidden');
 
     try {
       const generatedBytes = await PDFProcessor.generateSortedPDF(
         state.pdfArrayBuffer,
-        state.sortedPages,
+        pagesToExport,
         {
           resize: state.resizeEnabled,
           widthMm: state.widthMm,
@@ -640,7 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Create Blob and trigger download
       const blob = new Blob([generatedBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const filename = `Bosta_Sorted_Thermal_${state.sortedPages.length}_Orders.pdf`;
+      const filename = `${filenamePrefix}_${pagesToExport.length}_Orders.pdf`;
 
       const downloadLink = document.createElement('a');
       downloadLink.href = url;
@@ -654,25 +709,68 @@ document.addEventListener('DOMContentLoaded', () => {
       // Confetti celebration if library is available
       if (typeof confetti === 'function') {
         confetti({
-          particleCount: 80,
-          spread: 70,
+          particleCount: 70,
+          spread: 60,
           origin: { y: 0.8 }
         });
       }
 
-      showToast(`تم تنزيل الملف بنجاح (${state.sortedPages.length} بوليصة مرتبة)!`, 'success');
+      showToast(`تم تنزيل ملف (${filenamePrefix}) بنجاح (${pagesToExport.length} بوليصة)!`, 'success');
     } catch (err) {
       console.error(err);
       showToast(`فشل إنشاء ملف الـ PDF: ${err.message}`, 'error');
     } finally {
       elements.downloadTopBtn.disabled = false;
       elements.downloadStickyBtn.disabled = false;
+      if (elements.downloadFilteredBtn) elements.downloadFilteredBtn.disabled = false;
       setTimeout(() => elements.progressSection.classList.add('hidden'), 800);
     }
   }
 
-  elements.downloadTopBtn.addEventListener('click', downloadSortedPDF);
-  elements.downloadStickyBtn.addEventListener('click', downloadSortedPDF);
+  // Full Sorted PDF
+  elements.downloadTopBtn.addEventListener('click', () => {
+    exportBatchPDF(state.sortedPages, 'Bosta_All_Sorted_Thermal');
+  });
+  elements.downloadStickyBtn.addEventListener('click', () => {
+    exportBatchPDF(state.sortedPages, 'Bosta_All_Sorted_Thermal');
+  });
+
+  // Category Batch Downloads
+  if (elements.downloadKidsBtn) {
+    elements.downloadKidsBtn.addEventListener('click', () => {
+      const kids = state.sortedPages.filter(p => p.category === 'kids');
+      exportBatchPDF(kids, 'Bosta_Kids_Orders_Only');
+    });
+  }
+
+  if (elements.downloadWomenBtn) {
+    elements.downloadWomenBtn.addEventListener('click', () => {
+      const women = state.sortedPages.filter(p => p.category === 'women');
+      exportBatchPDF(women, 'Bosta_Women_Orders_Only');
+    });
+  }
+
+  if (elements.downloadOtherBtn) {
+    elements.downloadOtherBtn.addEventListener('click', () => {
+      const other = state.sortedPages.filter(p => p.category === 'other');
+      exportBatchPDF(other, 'Bosta_Others_Orders_Only');
+    });
+  }
+
+  if (elements.downloadMultiBtn) {
+    elements.downloadMultiBtn.addEventListener('click', () => {
+      const multi = state.sortedPages.filter(p => p.category === 'multi');
+      exportBatchPDF(multi, 'Bosta_Multi_Orders_Only');
+    });
+  }
+
+  // Filtered Search Results Download
+  if (elements.downloadFilteredBtn) {
+    elements.downloadFilteredBtn.addEventListener('click', () => {
+      exportBatchPDF(state.currentFilteredPages, 'Bosta_Filtered_Search_Results');
+    });
+  }
+
   elements.processBtn.addEventListener('click', processLabels);
 
   /**

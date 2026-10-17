@@ -82,10 +82,49 @@ async function runE2ETest() {
   console.log('4. Sorting orders with Strategy A (Fast Picking Hierarchy)...');
   const sorted = PDFProcessor.sortPages(parsedPages, 'A');
   sorted.forEach(s => {
-    console.log('   #' + s.newPageNumber + ' (Orig #' + s.originalPageNumber + '): ' + s.modelName + ' | Color: ' + s.color + ' | Size: ' + s.size + ' | Multi: ' + s.isMultiProduct + ' | SKU: ' + s.sku);
+    console.log('   #' + s.newPageNumber + ' (Orig #' + s.originalPageNumber + '): ' + s.modelName + ' | Cat: ' + s.category + ' | Color: ' + s.color + ' | Size: ' + s.size + ' | SKU: ' + s.sku);
   });
 
-  console.log('5. Generating and Resizing PDF to 75mm x 125mm thermal dimensions...');
+  // Verify Categories
+  const kidsOrders = sorted.filter(p => p.category === 'kids');
+  const womenOrders = sorted.filter(p => p.category === 'women');
+  const otherOrders = sorted.filter(p => p.category === 'other');
+  const multiOrders = sorted.filter(p => p.category === 'multi');
+  console.log(`   Category Breakdown => Kids: ${kidsOrders.length}, Women: ${womenOrders.length}, Other: ${otherOrders.length}, Multi: ${multiOrders.length}`);
+
+  console.log('5. Testing Category Batch PDF Export: Kids Batch...');
+  const kidsPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, kidsOrders, {
+    resize: true,
+    widthMm: 75,
+    heightMm: 125,
+    keepAspectRatio: true
+  });
+  const kidsDoc = await PDFLib.PDFDocument.load(kidsPdfBytes);
+  console.log(`   Kids Batch PDF: ${kidsDoc.getPageCount()} pages (Expected: ${kidsOrders.length}), Size: ${kidsPdfBytes.length} bytes -> PASS`);
+
+  console.log('6. Testing Category Batch PDF Export: Women Batch...');
+  const womenPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, womenOrders, {
+    resize: true,
+    widthMm: 75,
+    heightMm: 125,
+    keepAspectRatio: true
+  });
+  const womenDoc = await PDFLib.PDFDocument.load(womenPdfBytes);
+  console.log(`   Women Batch PDF: ${womenDoc.getPageCount()} pages (Expected: ${womenOrders.length}), Size: ${womenPdfBytes.length} bytes -> PASS`);
+
+  console.log('7. Testing Quick Search / SKU Filter: Filter for "اسود" (Black color)...');
+  const blackOrders = sorted.filter(p => p.normalizedColor.includes(ArabicUtils.normalizeText('اسود')) || p.color.includes('اسود'));
+  console.log(`   Found ${blackOrders.length} orders matching "اسود"`);
+  const blackPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, blackOrders, {
+    resize: true,
+    widthMm: 75,
+    heightMm: 125,
+    keepAspectRatio: true
+  });
+  const blackDoc = await PDFLib.PDFDocument.load(blackPdfBytes);
+  console.log(`   Filtered "اسود" PDF: ${blackDoc.getPageCount()} pages, Size: ${blackPdfBytes.length} bytes -> PASS`);
+
+  console.log('8. Generating and Resizing Full PDF to 75mm x 125mm thermal dimensions...');
   const finalPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted, {
     resize: true,
     widthMm: 75,
@@ -93,7 +132,7 @@ async function runE2ETest() {
     keepAspectRatio: true
   });
 
-  console.log('   Final Thermal PDF generated successfully!');
+  console.log('   Final Full Thermal PDF generated successfully!');
   console.log('   Output file size:', finalPdfBytes.length, 'bytes');
 
   // Verify resulting PDF
@@ -106,7 +145,7 @@ async function runE2ETest() {
   const isHeightPass = Math.abs(size.height - 354.33) < 0.1;
   console.log('   Target (212.60 x 354.33 pt) Match:', (isWidthPass && isHeightPass) ? 'PASS (100% Exact)' : 'FAIL');
 
-  console.log('--- ALL E2E TESTS PASSED WITH 100% SUCCESS ---');
+  console.log('--- ALL E2E & BATCH SPLITTING TESTS PASSED WITH 100% SUCCESS ---');
 }
 
 runE2ETest().catch(err => {

@@ -439,7 +439,7 @@ const ArabicUtils = {
     // Primary product for sorting
     const primaryProduct = parsedProducts.length > 0 ? parsedProducts[0] : null;
 
-    return {
+    const parsedData = {
       originalPageNumber: pageNumber,
       trackingNumber: trackingNumber || `AWB-${pageNumber}`,
       city: city || 'غير محدد',
@@ -458,6 +458,93 @@ const ArabicUtils = {
       totalItemsCount: totalItemsCount,
       hasRecognizedDescription: parsedProducts.length > 0
     };
+
+    // Auto assign category: kids, women, other, multi
+    parsedData.category = this.categorizeOrder(parsedData);
+
+    return parsedData;
+  },
+
+  /**
+   * Categorizes an order based on product lines and descriptions:
+   * - 'kids': أطفال / Kids
+   * - 'women': حريمي / Women
+   * - 'other': منتجات أخرى / Others (سجاد، إكسسوارات، غير مصنف)
+   * - 'multi': أوردرات متعددة / Multi-item Orders
+   */
+  categorizeOrder(item) {
+    if (!item) return 'other';
+
+    if (item.isMultiProduct) {
+      return 'multi';
+    }
+
+    const fullText = (
+      (item.modelName || '') + ' ' +
+      (item.rawDescription || '') + ' ' +
+      (item.products ? item.products.map(p => (p.modelName || '') + ' ' + (p.raw || '')).join(' ') : '')
+    );
+    const normalized = this.normalizeText(fullText);
+
+    // 1. Kids: اطفال, اطفالي, بيبي, ولادي, بناتي (and visual reverse forms)
+    if (
+      normalized.includes('اطفال') ||
+      normalized.includes('اطفالي') ||
+      normalized.includes('بيبي') ||
+      normalized.includes('ولادي') ||
+      normalized.includes('بناتي') ||
+      fullText.includes('يلافطا') ||
+      fullText.includes('لافطا')
+    ) {
+      return 'kids';
+    }
+
+    // 2. Women: حريمي, نسائي, سيدات, اسدال, عبايه
+    if (
+      normalized.includes('حريمي') ||
+      normalized.includes('نسائي') ||
+      normalized.includes('سيدات') ||
+      normalized.includes('اسدال') ||
+      normalized.includes('عبايه') ||
+      fullText.includes('يميرح')
+    ) {
+      return 'women';
+    }
+
+    return 'other';
+  },
+
+  /**
+   * Get metadata for a given category (label, badge styles)
+   */
+  getCategoryMeta(categoryId) {
+    switch (categoryId) {
+      case 'kids':
+        return {
+          id: 'kids',
+          label: 'أطفال / Kids',
+          badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+        };
+      case 'women':
+        return {
+          id: 'women',
+          label: 'حريمي / Women',
+          badgeClass: 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+        };
+      case 'multi':
+        return {
+          id: 'multi',
+          label: 'أوردرات متعددة / Multi-item',
+          badgeClass: 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+        };
+      case 'other':
+      default:
+        return {
+          id: 'other',
+          label: 'منتجات أخرى / Others',
+          badgeClass: 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+        };
+    }
   }
 };
 
