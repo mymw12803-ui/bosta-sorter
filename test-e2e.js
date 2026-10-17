@@ -44,6 +44,25 @@ async function runE2ETest() {
   global.PDFProcessor = PDFProcessor;
   global.DemoGenerator = DemoGenerator;
 
+  console.log('0. Testing Rubik Font Null-Byte Recovery & Skeleton Matcher...');
+  const testDegraded1 = 'اسدال رقة ا\x00فالي';
+  const match1 = ArabicUtils.matchWarehouseModel(testDegraded1);
+  console.log(`   Degraded input: "${testDegraded1}" -> Matched: "${match1}" (Expected: "اسدال رقة اطفالي") -> ${match1 === 'اسدال رقة اطفالي' ? 'PASS' : 'FAIL'}`);
+
+  const testDegraded2 = 'خمار ب\x00ليسيه حريمي';
+  const match2 = ArabicUtils.matchWarehouseModel(testDegraded2);
+  console.log(`   Degraded input: "${testDegraded2}" -> Matched: "${match2}" (Expected: "خمار بيليسيه حريمي") -> ${match2 === 'خمار بيليسيه حريمي' ? 'PASS' : 'FAIL'}`);
+
+  // Test Variant Code & Color parsing
+  const parsedColor = ArabicUtils.parseColorAndCode('اسود (Z1)');
+  console.log(`   Color test "اسود (Z1)": Color="${parsedColor.color}", Code="${parsedColor.code}" -> ${parsedColor.color === 'اسود' && parsedColor.code === 'Z1' ? 'PASS' : 'FAIL'}`);
+
+  // Test strict QTY product line parser
+  const validProductLine = ArabicUtils.parseProductLine('اسدال رقة حريمي - اسود (Z1) / الاول (QTY 2)');
+  console.log(`   Strict QTY Line:`, validProductLine ? `Parsed model="${validProductLine.modelName}", qty=${validProductLine.qty}` : 'FAILED');
+  const rejectedNonProduct = ArabicUtils.parseProductLine('50.00 ج.م HUB FM-OBOUR');
+  console.log(`   Strict Non-Product rejection: ${rejectedNonProduct === null ? 'PASS (Correctly rejected)' : 'FAIL'}`);
+
   console.log('1. Generating Demo Bosta PDF...');
   const samplePdfBytes = await DemoGenerator.createSampleBostaPdfBytes();
   console.log('   Demo PDF generated, byte length:', samplePdfBytes.length);
