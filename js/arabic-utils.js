@@ -1,18 +1,211 @@
 /**
  * Bosta Shipping Label & Arabic Text Processing Utilities
- * High accuracy normalization, text extraction and line parser for Egyptian e-commerce / Bosta AWBs.
+ * - Rubik Font CMap Null-Byte Recovery (via pako decompress & patch)
+ * - Built-in Warehouse Master Catalog & Smart Fuzzy/Skeleton Matcher
+ * - Strict Coordinate & Pattern Line Extraction for Bosta Labels (bbox 212.63 x 354.25 pt)
  */
 
 const ArabicUtils = {
+  // Built-in Warehouse Master Catalog (55 official products from Shopify inventory)
+  WAREHOUSE_TITLES: [
+    "اسدال رقة اطفالي", "اسدال رقة حريمي", "اسدال مشجر اطفالي", "جيبة بطانة",
+    "خمار مشجر بأكمام", "ملحفة صلاة مشجرة", "ملحفه جيب وتر بروف", "توتي باج",
+    "اسدال بخمار أطفالي مشجر", "اسدال زهرة", "طقم صلاه فسكوز حريمي", "اسدال عباية",
+    "خمار بدون اكمام سادة", "سجادة صلاة اطفالي صغيرة", "خمار بيليسيه اطفالي",
+    "خمار بيليسيه حريمي", "اسدال بخمار حريمي مشجر", "خمار مشجر بدون اكمام",
+    "اسدال مشجر", "جيبه صلاه فيسكوز", "خمار زبدة", "سجادة الهدي قطيفة",
+    "اسدال فراشة", "اسدال بكشكشة", "ملحفه صلاه سادة", "اسدال فسكوز مشجر",
+    "سجادة صلاة قطيفة مطبوعة", "سجادة صلاة اطفالي قطيفة", "اسدال بجيوب حريمي",
+    "اسدال شريطه", "اسدال جوبير حريمي", "اسدال بنس حريمي", "اسدال بخمار حريمي سادة",
+    "اسدال وقار سادة", "خمار بأكمام سادة", "جيبه صلاه ليكرا", "سجادة جيب",
+    "طقم جيب وتر بروف", "جيبة صلاة وتر بروف", "طقم صلاه حريمي سادة",
+    "طقم الاميرات حريمي", "طقم صلاه حريمي مشجر", "اسدال تلبيسه حريمي",
+    "اسدال بخمار أطفالي", "اسدال مطرز", "اسدال بنس اطفالي", "طقم الاميرات اطفالي",
+    "طقم صلاه اطفالي ساده", "طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات",
+    "اسدال جوبير اطفالي", "شنطة تهادوا تحابوا", "طقم صلاه حريمي قطعتين لون كشميري فراشات",
+    "اسدال بجيوب اطفالي", "اسدال تلبيسه اطفالي"
+  ],
+
+  // Known standard colors
+  KNOWN_COLORS: [
+    "اسود", "أسود", "كشميري", "كشمير", "مينت غامق", "مينت", "كافيه", "بيج فاتح", "بيج",
+    "لبني", "موف", "بينك", "بترولي", "بتنجاني", "زيتي", "زيتوني", "اخضر", "أخضر",
+    "ازرق", "أزرق", "كحلي", "نبيتي", "لافندر", "سكري", "رمادي غامق", "جراي",
+    "اوف وايت", "أبيض", "ابيض", "بني", "وردي", "أصفر", "اصفر", "الأقصى"
+  ],
+
+  // Known sizes
+  KNOWN_SIZES: ["الاول", "الأول", "الثاني", "الثالث", "الرابع", "1", "2", "3", "4"],
+
+  // Fixed Rubik font subset Glyph ID mapping table for connected Arabic presentation glyphs
+  RUBIK_GLYPH_RANGES: [
+    { start: 0x0137, end: 0x0137, unicode: '0627' }, // ا
+    { start: 0x0138, end: 0x0139, unicode: '0622' }, // آ
+    { start: 0x013A, end: 0x013A, unicode: '0623' }, // أ
+    { start: 0x013B, end: 0x013B, unicode: '0625' }, // إ
+    { start: 0x013C, end: 0x0140, unicode: '0626' }, // ئ
+    { start: 0x0141, end: 0x0143, unicode: '0628' }, // ب
+    { start: 0x0144, end: 0x0146, unicode: '062A' }, // ت
+    { start: 0x0147, end: 0x0149, unicode: '062B' }, // ث
+    { start: 0x014A, end: 0x014C, unicode: '062C' }, // ج
+    { start: 0x014D, end: 0x014F, unicode: '062D' }, // ح
+    { start: 0x0150, end: 0x0152, unicode: '062E' }, // خ
+    { start: 0x0153, end: 0x0153, unicode: '062F' }, // د
+    { start: 0x0154, end: 0x0154, unicode: '0630' }, // ذ
+    { start: 0x0155, end: 0x0155, unicode: '0631' }, // ر
+    { start: 0x0156, end: 0x0156, unicode: '0632' }, // ز
+    { start: 0x0157, end: 0x0159, unicode: '0633' }, // س
+    { start: 0x015A, end: 0x015C, unicode: '0634' }, // ش
+    { start: 0x015D, end: 0x015F, unicode: '0635' }, // ص
+    { start: 0x0160, end: 0x0162, unicode: '0636' }, // ض
+    { start: 0x0163, end: 0x0165, unicode: '0637' }, // ط
+    { start: 0x0166, end: 0x0168, unicode: '0638' }, // ظ
+    { start: 0x0169, end: 0x016B, unicode: '0639' }, // ع
+    { start: 0x016C, end: 0x016E, unicode: '063A' }, // غ
+    { start: 0x016F, end: 0x0171, unicode: '0641' }, // ف
+    { start: 0x0172, end: 0x0174, unicode: '0642' }, // ق
+    { start: 0x0175, end: 0x017F, unicode: '0643' }, // ك
+    { start: 0x0180, end: 0x0182, unicode: '0644' }, // ل
+    { start: 0x0183, end: 0x0185, unicode: '0645' }, // م
+    { start: 0x0186, end: 0x0188, unicode: '0646' }, // ن
+    { start: 0x0189, end: 0x018B, unicode: '0647' }, // ه
+    { start: 0x018C, end: 0x018C, unicode: '0629' }, // ة
+    { start: 0x018D, end: 0x018D, unicode: '0648' }, // و
+    { start: 0x018E, end: 0x018F, unicode: '0649' }, // ى
+    { start: 0x0190, end: 0x0192, unicode: '064A' }, // ي
+    { start: 0x0196, end: 0x0197, unicode: '06440627' }, // لا
+    { start: 0x019A, end: 0x019B, unicode: '06440623' }, // لأ
+    { start: 0x019C, end: 0x019D, unicode: '06440625' }  // لإ
+  ],
+
   /**
-   * Normalizes Arabic text for sorting and matching
-   * Strips tashkeel, tatweel, standardizes alef, yaa, taa marbuta
+   * Decompress and patch /ToUnicode CMap in memory using pako.js
+   * Replaces null byte mappings <0000> for Rubik subset fonts
+   */
+  patchPdfCMap(pdfBytes) {
+    if (typeof pako === 'undefined' || !pdfBytes) return pdfBytes;
+
+    try {
+      const u8 = new Uint8Array(pdfBytes);
+      const latin1 = [];
+      const len = u8.byteLength;
+      
+      // Build replacement bfchar block for Rubik font
+      const bfcharList = [];
+      for (const item of this.RUBIK_GLYPH_RANGES) {
+        for (let c = item.start; c <= item.end; c++) {
+          const hexC = c.toString(16).padStart(4, '0').toUpperCase();
+          bfcharList.push(`<${hexC}> <${item.unicode}>`);
+        }
+      }
+      // Add digits (0x01A2..0x01AB & 0x01AC..0x01B5)
+      for (let c = 0x01A2; c <= 0x01AB; c++) {
+        const uDigit = (0x0030 + (c - 0x01A2)).toString(16).padStart(4, '0');
+        bfcharList.push(`<${c.toString(16).padStart(4, '0').toUpperCase()}> <${uDigit}>`);
+      }
+      for (let c = 0x01AC; c <= 0x01B5; c++) {
+        const uDigit = (0x0030 + (c - 0x01AC)).toString(16).padStart(4, '0');
+        bfcharList.push(`<${c.toString(16).padStart(4, '0').toUpperCase()}> <${uDigit}>`);
+      }
+      // Parentheses
+      bfcharList.push('<01B6> <0028>');
+      bfcharList.push('<01B8> <0028>');
+      bfcharList.push('<01B7> <0029>');
+      bfcharList.push('<01B9> <0029>');
+
+      const patchBlock = `\n${bfcharList.length} beginbfchar\n${bfcharList.join('\n')}\nendbfchar\n`;
+
+      // Search for stream segments
+      let modified = false;
+      const chunks = [];
+      let cursor = 0;
+
+      // Fast scan for 'stream' keywords
+      const streamMarker = [115, 116, 114, 101, 97, 109]; // 'stream'
+      const endstreamMarker = [101, 110, 100, 115, 116, 114, 101, 97, 109]; // 'endstream'
+
+      let i = 0;
+      while (i < len - 10) {
+        let match = true;
+        for (let m = 0; m < 6; m++) {
+          if (u8[i + m] !== streamMarker[m]) { match = false; break; }
+        }
+
+        if (match) {
+          // Found 'stream', skip newline (\r\n or \n)
+          let streamStart = i + 6;
+          if (u8[streamStart] === 13 && u8[streamStart + 1] === 10) streamStart += 2;
+          else if (u8[streamStart] === 10) streamStart += 1;
+
+          // Find 'endstream'
+          let streamEnd = -1;
+          for (let k = streamStart; k < len - 9; k++) {
+            let endMatch = true;
+            for (let e = 0; e < 9; e++) {
+              if (u8[k + e] !== endstreamMarker[e]) { endMatch = false; break; }
+            }
+            if (endMatch) {
+              streamEnd = k;
+              // backtrack trailing whitespace/newline
+              if (u8[streamEnd - 1] === 10) streamEnd--;
+              if (u8[streamEnd - 1] === 13) streamEnd--;
+              break;
+            }
+          }
+
+          if (streamEnd > streamStart) {
+            const streamBytes = u8.subarray(streamStart, streamEnd);
+            try {
+              const decompressed = pako.inflate(streamBytes, { to: 'string' });
+              if (decompressed.includes('begincmap') && (decompressed.includes('<0000>') || decompressed.includes('0137'))) {
+                let patchedText = decompressed;
+                if (patchedText.includes('<0137> <01A1> <0000>')) {
+                  patchedText = patchedText.replace('<0137> <01A1> <0000>', '');
+                }
+                patchedText = patchedText.replace('endcmap', patchBlock + 'endcmap');
+
+                const recompressed = pako.deflate(patchedText);
+
+                // Slice leading chunk up to streamStart
+                chunks.push(u8.subarray(cursor, streamStart));
+                chunks.push(recompressed);
+                cursor = streamEnd;
+                modified = true;
+                i = streamEnd + 9;
+                continue;
+              }
+            } catch (_) {
+              // Not a deflate stream or not a CMap, ignore
+            }
+          }
+        }
+        i++;
+      }
+
+      if (modified) {
+        chunks.push(u8.subarray(cursor));
+        let totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+        const merged = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.byteLength;
+        }
+        return merged.buffer;
+      }
+    } catch (e) {
+      console.warn('PDF CMap patch skipped:', e);
+    }
+
+    return pdfBytes;
+  },
+
+  /**
+   * Normalizes Arabic text for grouping, matching and comparison
    */
   normalizeText(text) {
     if (!text || typeof text !== 'string') return '';
-    
-    // Fix visual Arabic character runs if detected
-    let str = this.fixVisualArabic(text);
+    let str = text;
 
     // Remove Tashkeel / Diacritics
     str = str.replace(/[\u064B-\u065F\u0670]/g, '');
@@ -35,167 +228,205 @@ const ArabicUtils = {
     // Convert Arabic-Indic numerals (٠-٩) to standard (0-9)
     str = str.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 
-    // Collapse whitespace
+    // Clean whitespace
     str = str.replace(/\s+/g, ' ').trim().toLowerCase();
 
     return str;
   },
 
   /**
-   * Reverses Arabic character runs inside words,
-   * while keeping English text, numbers, punctuation, and (1 QTY) / (QTY 1) intact.
-   * Example: "مقط تارياملا يلافطا - يريمشك / ثلاثلا (1 QTY)"
-   *       -> "طقم الاميرات اطفالي - كشميري / الثالث (1 QTY)"
-   * Example: "مقط - كشميري / الثالث (QTY 1) ba014e2"
-   *       -> "طقم - كشميري / الثالث (QTY 1) ba014e2"
+   * Intelligent fuzzy and skeleton matcher that repairs missing glyphs / null-bytes
+   * by matching character lengths, surviving letters and words to WAREHOUSE_TITLES
    */
-  reverseArabicRuns(text) {
-    if (!text || typeof text !== 'string') return '';
+  matchWarehouseModel(extractedModel) {
+    if (!extractedModel) return '';
 
-    // Unicode range covering all Arabic character blocks, tashkeel, presentation forms
-    const arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g;
+    // Remove residual null bytes or replace with wildcard '?'
+    const cleanRaw = extractedModel.replace(/[\x00\u0000]/g, '?').trim();
+    const normExtracted = this.normalize(cleanRaw);
 
-    return text.replace(arabicRegex, (match) => {
-      return match.split('').reverse().join('');
-    });
-  },
-
-  /**
-   * Alias for reverseArabicRuns
-   */
-  reverseArabicWords(text) {
-    return this.reverseArabicRuns(text);
-  },
-
-  /**
-   * Checks if an Arabic string or token appears to be in visual reverse order
-   * Indicators:
-   * - Words starting with Taa Marbuta 'ة' (impossible in natural Arabic, e.g. ةنحشلا, ةفيطق)
-   * - Common reversed Bosta tokens (مقط, يلافطا, يريمشك, فصو, ةنحشلا, تاحولم, ثلاثلا, يناثلا, لوالا)
-   */
-  isReversedArabic(text) {
-    if (!text || typeof text !== 'string') return false;
-
-    // Check for impossible Arabic word start: Taa Marbuta at the beginning of a word
-    if (/(?:^|\s)ة[\u0600-\u06FF]+/i.test(text)) {
-      return true;
+    // 1. Direct match
+    for (const t of this.WAREHOUSE_TITLES) {
+      if (this.normalize(t) === normExtracted) return t;
     }
 
-    const reversedKeywords = [
-      'ةنحشلا', 'فصو', 'تاحولم', 'مقط', 'يلافطا', 'يريمشك',
-      'تارياملا', 'ثلاثلا', 'يناثلا', 'لوالا', 'دوسا', 'ضيبا', 'لسرملا'
-    ];
-    return reversedKeywords.some(kw => text.includes(kw));
+    // 2. Substring match
+    for (const t of this.WAREHOUSE_TITLES) {
+      const nt = this.normalize(t);
+      if (normExtracted.length >= 5 && (normExtracted.includes(nt) || nt.includes(normExtracted))) {
+        return t;
+      }
+    }
+
+    // 3. Word-level skeleton matcher (handles null-bytes \x00)
+    const extWords = normExtracted.split(/\s+/).filter(Boolean);
+    let bestCandidate = extractedModel.replace(/[\x00\u0000?]/g, '').trim();
+    let highestScore = -1;
+
+    for (const candidate of this.WAREHOUSE_TITLES) {
+      const candWords = this.normalize(candidate).split(/\s+/).filter(Boolean);
+      if (Math.abs(candWords.length - extWords.length) > 1) continue;
+
+      let score = 0;
+      const minWords = Math.min(candWords.length, extWords.length);
+
+      for (let w = 0; w < minWords; w++) {
+        const eW = extWords[w];
+        const cW = candWords[w];
+
+        if (eW === cW) {
+          score += 10;
+        } else {
+          // Letter comparison with wildcard '?'
+          let matches = 0;
+          let wildcards = 0;
+          let diffs = 0;
+          const minL = Math.min(eW.length, cW.length);
+
+          if (Math.abs(eW.length - cW.length) <= 1) {
+            for (let k = 0; k < minL; k++) {
+              if (eW[k] === '?') wildcards++;
+              else if (eW[k] === cW[k]) matches++;
+              else diffs++;
+            }
+            if (diffs === 0 && (matches > 0 || wildcards > 0)) {
+              score += (matches * 2) + wildcards;
+            }
+          }
+        }
+      }
+
+      if (score > highestScore && score >= 6) {
+        highestScore = score;
+        bestCandidate = candidate;
+      }
+    }
+
+    return bestCandidate || extractedModel;
+  },
+
+  normalize(s) {
+    if (!s) return '';
+    return s.replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, ' ').trim();
   },
 
   /**
-   * Automatically fixes visual Arabic reversal in any text,
-   * preserving English and numbers completely intact.
+   * Parses color and optional variant code like (Z1), (V4), (W3)
    */
-  fixVisualArabic(text, force = false) {
-    if (!text || typeof text !== 'string') return '';
-    if (force || this.isReversedArabic(text)) {
-      return this.reverseArabicRuns(text);
+  parseColorAndCode(rawColor) {
+    if (!rawColor) return { color: '', code: '' };
+
+    let code = '';
+    const codeMatch = rawColor.match(/\(?([A-Za-z]{1,2}\d{1,2})\)?/);
+    if (codeMatch) {
+      code = codeMatch[1].toUpperCase();
     }
-    return text;
+
+    // Clean code out of color text
+    let cleanColor = rawColor.replace(/\(?([A-Za-z]{1,2}\d{1,2})\)?/g, '').replace(/[\x00\u0000]/g, '').trim();
+
+    // Match with KNOWN_COLORS
+    let matchedColor = cleanColor;
+    const normClean = this.normalize(cleanColor);
+    for (const c of this.KNOWN_COLORS) {
+      if (this.normalize(c) === normClean) {
+        matchedColor = c;
+        break;
+      }
+    }
+
+    return { color: matchedColor, code };
   },
 
   /**
-   * Fallback whole-string reversal
+   * Matches size string against KNOWN_SIZES
    */
-  reverseString(str) {
-    if (!str) return '';
-    return str.split('').reverse().join('');
+  parseSize(rawSize) {
+    if (!rawSize) return '';
+    const clean = rawSize.replace(/[\x00\u0000]/g, '').trim();
+    const norm = this.normalize(clean);
+
+    for (const s of this.KNOWN_SIZES) {
+      if (this.normalize(s) === norm) {
+        return s;
+      }
+    }
+
+    if (norm === '1') return 'الأول';
+    if (norm === '2') return 'الثاني';
+    if (norm === '3') return 'الثالث';
+    if (norm === '4') return 'الرابع';
+
+    return clean;
   },
 
   /**
-   * Extracts SKU patterns from notes or description text.
-   * Typical Bosta format: 2 letters, 3 digits, 2-4 alphanumeric (e.g., ba014e2, eb033x0, Ac055ca4)
-   * Also captures general alphanumeric SKU formats (e.g., PRD-1234, ABC123X, etc.)
-   */
-  extractSKU(text) {
-    if (!text) return '';
-
-    // Primary Bosta/Warehouse pattern (e.g. ba014e2, eb033x0, Ac055ca4)
-    const specificPattern = /\b([a-zA-Z]{2}\d{3}[a-zA-Z0-9]{2,4})\b/i;
-    const matchSpecific = text.match(specificPattern);
-    if (matchSpecific) {
-      return matchSpecific[1].toUpperCase();
-    }
-
-    // Secondary pattern: standard SKU codes (e.g., SKU-12345, AB-123-CD, etc.)
-    const generalPattern = /\b(SKU[:\s-]*([A-Za-z0-9_-]{4,15}))\b/i;
-    const matchGeneral = text.match(generalPattern);
-    if (matchGeneral) {
-      return matchGeneral[2].toUpperCase();
-    }
-
-    // Fallback: standalone code like BA0123 or similar
-    const fallbackPattern = /\b([a-zA-Z]{1,3}[0-9]{3,6}[a-zA-Z0-9]{1,3})\b/;
-    const matchFallback = text.match(fallbackPattern);
-    if (matchFallback) {
-      return matchFallback[1].toUpperCase();
-    }
-
-    return '';
-  },
-
-  /**
-   * Parse a single product string into structured components:
-   * Example: "طقم الاميرات اطفالي - كشميري / الثالث (QTY 1)"
-   * Example: "سجادة صلاة قطيفة مطبوعة - الأقصى (QTY 3)"
-   * Example: "اسدال رقة حريمي - اسود / L x2"
+   * Strict Product Line Parser
+   * A line is ONLY a product line if it contains QTY (e.g. (QTY 1), (1 QTY), (QTY 3))
+   * Format in Bosta: [Model Title] - [Color (Optional Code e.g. Z1, V4, W3)] / [Size] (QTY X)
    */
   parseProductLine(line) {
-    if (!line) return null;
-    
-    // Automatically fix visual Arabic reversal for natural Arabic UI preview and matching
-    let cleanLine = this.fixVisualArabic(line).trim();
+    if (!line || typeof line !== 'string') return null;
 
-    // Check for quantity (supports: "(QTY 1)", "(1 QTY)", "QTY: 2", "(1x)", "x 2", "(2 قطعة)")
+    // Filter out forbidden headers and lines immediately
+    if (/م\.ج|ج\.م|HUB|Tracking\s*Number|Order\s*Reference|FM-OBOUR|EC-|Created:|\+201/i.test(line)) {
+      return null;
+    }
+
+    // MUST contain QTY
+    if (!/QTY/i.test(line)) {
+      return null;
+    }
+
+    // Extract quantity
     let qty = 1;
-    const qtyMatch = cleanLine.match(/(?:\(?\s*(?:QTY[:\s]*(\d+)|(\d+)\s*QTY)\s*\)?)|(?:\(?\s*(\d+)\s*[xX]\s*\)?)|(?:[xX]\s*(\d+))|(?:\((\d+)\s*(?:قطعة|قطع)\))/i);
+    const qtyMatch = line.match(/(?:QTY[:\s]*(\d+)|\((\d+)\s*QTY\)|\(QTY\s*(\d+)\)|(\d+)\s*QTY)/i);
     if (qtyMatch) {
-      qty = parseInt(qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4] || qtyMatch[5] || '1', 10);
-      cleanLine = cleanLine.replace(qtyMatch[0], '').trim();
+      qty = parseInt(qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4], 10) || 1;
     }
 
-    let modelName = '';
-    let color = '';
-    let size = '';
+    // Remove QTY from line
+    let clean = line.replace(/\(?(?:QTY[:\s]*\d+|\d+\s*QTY|[0-9]+\s*x)\)?/gi, '').trim();
 
-    // Structure: [Model Name] - [Color/Variant] / [Size]
-    if (cleanLine.includes('-')) {
-      const dashParts = cleanLine.split('-');
-      modelName = dashParts[0].trim();
-      const remainder = dashParts.slice(1).join('-').trim();
+    // Split by '-' and '/'
+    let rawModel = clean;
+    let rawColor = '';
+    let rawSize = '';
 
-      if (remainder.includes('/')) {
-        const slashParts = remainder.split('/');
-        color = slashParts[0].trim();
-        size = slashParts.slice(1).join('/').trim();
+    if (clean.includes('-') && clean.includes('/')) {
+      const dashIdx = clean.indexOf('-');
+      const slashIdx = clean.indexOf('/');
+      if (dashIdx < slashIdx) {
+        rawModel = clean.substring(0, dashIdx).trim();
+        rawColor = clean.substring(dashIdx + 1, slashIdx).trim();
+        rawSize = clean.substring(slashIdx + 1).trim();
       } else {
-        color = remainder;
+        rawModel = clean.substring(0, slashIdx).trim();
+        rawSize = clean.substring(slashIdx + 1, dashIdx).trim();
+        rawColor = clean.substring(dashIdx + 1).trim();
       }
-    } else if (cleanLine.includes('/')) {
-      // Structure without dash: [Model Name] / [Size]
-      const slashParts = cleanLine.split('/');
-      modelName = slashParts[0].trim();
-      size = slashParts.slice(1).join('/').trim();
-    } else {
-      modelName = cleanLine;
+    } else if (clean.includes('-')) {
+      const parts = clean.split('-');
+      rawModel = parts[0].trim();
+      rawColor = parts.slice(1).join('-').trim();
+    } else if (clean.includes('/')) {
+      const parts = clean.split('/');
+      rawModel = parts[0].trim();
+      rawSize = parts.slice(1).join('/').trim();
     }
 
-    // Extract any embedded SKU if present inside product text
-    const embeddedSKU = this.extractSKU(line);
+    // Reconstruct clean official model, color, and size
+    const modelName = this.matchWarehouseModel(rawModel);
+    const { color, code: colorCode } = this.parseColorAndCode(rawColor);
+    const size = this.parseSize(rawSize);
 
     return {
-      raw: line.trim(),
-      modelName: modelName.trim(),
-      color: color.trim(),
-      size: size.trim(),
-      qty: isNaN(qty) ? 1 : qty,
-      sku: embeddedSKU,
+      modelName,
+      color,
+      colorCode,
+      size,
+      qty,
+      raw: line,
       normalizedModel: this.normalizeText(modelName),
       normalizedColor: this.normalizeText(color),
       normalizedSize: this.normalizeText(size)
@@ -203,61 +434,21 @@ const ArabicUtils = {
   },
 
   /**
-   * Returns a numerical rank for clothing sizes so they sort in true physical order:
-   * الاول (1) -> الثاني (2) -> الثالث (3) -> الرابع (4) -> الخامس (5)
-   * or XS -> S -> M -> L -> XL -> XXL -> 3XL
-   */
-  getSizeRank(normalizedSize) {
-    if (!normalizedSize) return 999;
-    const s = normalizedSize.trim().toLowerCase();
-
-    // Arabic Ordinals
-    if (s.includes('اول')) return 1;
-    if (s.includes('ثان')) return 2;
-    if (s.includes('ثالث')) return 3;
-    if (s.includes('رابع')) return 4;
-    if (s.includes('خامس')) return 5;
-    if (s.includes('سادس')) return 6;
-    if (s.includes('سابع')) return 7;
-    if (s.includes('ثامن')) return 8;
-
-    // Standard Apparel
-    if (s === 'xs') return 10;
-    if (s === 's') return 20;
-    if (s === 'm') return 30;
-    if (s === 'l') return 40;
-    if (s === 'xl') return 50;
-    if (s === 'xxl' || s === '2xl') return 60;
-    if (s === 'xxxl' || s === '3xl') return 70;
-    if (s === '4xl') return 80;
-    if (s === '5xl') return 90;
-
-    // Direct numbers (e.g. 1, 2, 3 or shoe sizes 38, 40)
-    const num = parseInt(s, 10);
-    if (!isNaN(num)) {
-      return 100 + num;
-    }
-
-    return 500;
-  },
-
-  /**
    * Intelligently parses extracted text items from a Bosta label page.
-   * Reconstructs text lines and extracts:
-   * - Tracking Number
-   * - Products under "وصف الشحنة"
-   * - Notes under "ملاحظات"
-   * - Customer/City info if present
+   * Uses exact geometry & strict filters:
+   * - Filters out non-product lines
+   * - Total Pieces Badge from pill line or QTY sum
+   * - Order Reference & Tracking Number
+   * - Notes & embedded SKUs
    */
   parseBostaPage(lines, pageNumber) {
-    let isInDescription = false;
-    let isInNotes = false;
-    const descriptionLines = [];
-    const notesLines = [];
+    const products = [];
     let trackingNumber = '';
     let orderReference = '';
     let totalPieces = '';
     let city = '';
+    const notesLines = [];
+    let lastProductIndex = -1;
 
     // Standard Egyptian cities for detection
     const egyptianCities = [
@@ -269,41 +460,37 @@ const ArabicUtils = {
     ];
 
     for (let i = 0; i < lines.length; i++) {
-      let line = lines[i].trim();
+      const line = lines[i].trim();
       if (!line) continue;
 
-      // Handle visual Arabic reversal while keeping English, numbers, and (1 QTY) intact
-      line = this.fixVisualArabic(line);
-      const normalizedLine = this.normalizeText(line);
-
-      // 1. Extract Total Pieces Count (e.g., [4 قطع], 1 قطعة, 4 Pieces, عطق 4)
+      // 1. Total Pieces extraction from pill line (e.g., [4 قطع], 1 قطعة, قطع 4)
       if (!totalPieces) {
-        const piecesMatch = line.match(/(?:\[|\b)(\d+)\s*(?:قطع|قطعة|قطعه|عطق|ةعطق|Pieces?)(?:\]|\b)/i) ||
-                            line.match(/(?:\[|\b)(?:قطع|قطعة|قطعه|عطق|ةعطق|Pieces?)\s*(\d+)(?:\]|\b)/i);
+        const piecesMatch = line.match(/(?:\[|\b)(\d+)\s*(?:قطع|قطعة|قطعه|عطق|Pieces?)(?:\]|\b)/i) ||
+                            line.match(/(?:\[|\b)(?:قطع|قطعة|قطعه|عطق|Pieces?)\s*(\d+)(?:\]|\b)/i);
         if (piecesMatch) {
-          totalPieces = `${piecesMatch[1]} قطع`;
+          totalPieces = `${piecesMatch[1] || piecesMatch[2]} قطع`;
         }
       }
 
-      // 2. Extract Tracking Number (AWB)
-      if (!trackingNumber) {
-        const trackingMatch = line.match(/(?:Tracking(?:\s*Number)?|رقم الشحنة|رقم التتبع|AWB)[:\s]*([0-9]{7,15})/i) ||
-                              line.match(/\b([0-9]{8,12})\b/);
-        if (trackingMatch) {
-          trackingNumber = trackingMatch[1];
-        }
-      }
-
-      // 3. Extract Order Reference / Barcode Code (e.g. EXC-U5111-353, ORD-1234, REF-99)
+      // 2. Order Reference / Barcode Code (e.g. EXC-U5111-353, SY-KHIAM-4972, U998-0245)
       if (!orderReference) {
-        const refMatch = line.match(/(?:Order\s*Ref(?:erence)?|مرجع الطلب|كود الشحنة|كود الطلب|Ref)[:\s]*([A-Za-z0-9_-]+)/i) ||
+        const refMatch = line.match(/(?:Order\s*Ref(?:erence)?|مرجع الطلب|كود الشحنة)[:\s]*([A-Za-z0-9_-]+)/i) ||
                          line.match(/\b([A-Z]{2,5}-[A-Z0-9]{3,10}-[0-9]{2,6})\b/i);
         if (refMatch) {
           orderReference = refMatch[1].trim();
         }
       }
 
-      // 4. Extract Egyptian City
+      // 3. Tracking Number (AWB)
+      if (!trackingNumber) {
+        const trackingMatch = line.match(/(?:Tracking(?:\s*Number)?|رقم الشحنة|رقم التتبع|AWB)[:\s]*([0-9]{8,15})/i) ||
+                              line.match(/\b([0-9]{9,11})\b/);
+        if (trackingMatch) {
+          trackingNumber = trackingMatch[1];
+        }
+      }
+
+      // 4. Egyptian City
       if (!city) {
         for (const c of egyptianCities) {
           if (line.includes(c)) {
@@ -313,265 +500,124 @@ const ArabicUtils = {
         }
       }
 
-      // 5. Strict Section Boundaries
-      const isDescriptionHeader = (
-        normalizedLine.includes('وصف الشحنه') ||
-        normalizedLine.includes('وصف الطلب') ||
-        normalizedLine.includes('محتويات الشحنه') ||
-        normalizedLine.includes('وصف الطرد') ||
-        (normalizedLine.includes('وصف') && (normalizedLine.includes('شحنه') || normalizedLine.includes('طلب'))) ||
-        /^(?:وصف\s*الشحن[ةه]|Description)$/i.test(normalizedLine)
-      );
-
-      const isNotesHeader = (
-        normalizedLine.includes('ملاحظات') ||
-        normalizedLine.includes('تعليمات التوصيل') ||
-        normalizedLine.includes('ملاحظات الشحنه') ||
-        normalizedLine.includes('notes')
-      );
-
-      const isOtherBoundaryHeader = (
-        normalizedLine.includes('بيانات المرسل') ||
-        normalizedLine.includes('بيانات المستلم') ||
-        normalizedLine.includes('المرسل اليه') ||
-        normalizedLine.includes('المبلغ المطلوب') ||
-        normalizedLine.includes('cod') ||
-        normalizedLine.includes('توقيع المستلم') ||
-        normalizedLine.includes('الباركود') ||
-        normalizedLine.includes('order reference') ||
-        normalizedLine.includes('tracking number') ||
-        normalizedLine.includes('مرجع الطلب')
-      );
-
-      if (isDescriptionHeader) {
-        isInDescription = true;
-        isInNotes = false;
-        // Check if description line has items directly after colon
-        const parts = line.split(/[:：]/);
-        if (parts.length > 1 && parts.slice(1).join(':').trim()) {
-          descriptionLines.push(parts.slice(1).join(':').trim());
-        }
-        continue;
-      }
-
-      if (isNotesHeader) {
-        isInDescription = false;
-        isInNotes = true;
-        const parts = line.split(/[:：]/);
-        if (parts.length > 1 && parts.slice(1).join(':').trim()) {
-          notesLines.push(parts.slice(1).join(':').trim());
-        }
-        continue;
-      }
-
-      if (isOtherBoundaryHeader && isInDescription) {
-        isInDescription = false;
-      }
-
-      if (isInDescription) {
-        // Discard hub codes (e.g. FM-OBOUR, EC-05), phone numbers, prices (e.g. 50 ج.م), and tracking labels
-        if (/^(?:FM-|EC-|CAI-|ALX-|HUB-)[A-Z0-9-]+$/i.test(line)) continue;
-        if (/\b(?:\d+\s*(?:ج\.م|EGP|LE|جنيه))\b/i.test(line)) continue;
-        if (/^(?:\+20|0020|01)[0-9]{8,9}$/.test(line.replace(/[\s-]/g, ''))) continue;
-        if (/Tracking|Order\s*Reference/i.test(line)) continue;
-        if (normalizedLine.includes('الكميه') && normalizedLine.includes('الصنف')) continue;
-
-        descriptionLines.push(line);
-      } else if (isInNotes) {
-        notesLines.push(line);
+      // 5. Product Line extraction (STRICT: only lines with QTY)
+      const parsedProduct = this.parseProductLine(line);
+      if (parsedProduct) {
+        products.push(parsedProduct);
+        lastProductIndex = i;
       }
     }
 
-    // Parse product items using strict quantity pattern splitting
-    const parsedProducts = [];
-    for (const dLine of descriptionLines) {
-      // Split lines that merge multiple products together using quantity marker e.g. (1 QTY) or (QTY 1)
-      const splitRegex = /(.+?\((?:QTY[:\s]*\d+|\d+\s*QTY|[0-9]+\s*(?:قطع|قطعة)|[0-9]+x)\))/gi;
-      let match;
-      let matchedAny = false;
-      while ((match = splitRegex.exec(dLine)) !== null) {
-        matchedAny = true;
-        const prod = this.parseProductLine(match[1].trim());
-        if (prod && prod.modelName) parsedProducts.push(prod);
-      }
-
-      if (!matchedAny) {
-        // Line without merged pattern
-        const subLines = dLine.split(/[;,،\n]/).map(s => s.trim()).filter(Boolean);
-        for (const sub of subLines) {
-          const prod = this.parseProductLine(sub);
-          if (prod && prod.modelName) {
-            parsedProducts.push(prod);
-          }
-        }
+    // Collect notes between last product line and footer
+    if (lastProductIndex !== -1) {
+      for (let k = lastProductIndex + 1; k < lines.length; k++) {
+        const l = lines[k].trim();
+        if (!l) continue;
+        if (/Tracking|Order\s*Ref|bosta|EC-|FM-/i.test(l)) break;
+        if (/ملاحظات|ملاحظه/i.test(l)) continue;
+        notesLines.push(l);
       }
     }
 
-    // Check notes for SKU
-    const combinedNotes = notesLines.join(' ');
-    let detectedSKU = this.extractSKU(combinedNotes);
-    if (!detectedSKU && parsedProducts.length > 0) {
-      for (const p of parsedProducts) {
-        if (p.sku) {
-          detectedSKU = p.sku;
-          break;
-        }
-      }
-    }
-    if (!detectedSKU) {
-      for (const line of lines) {
-        const candidate = this.extractSKU(line);
-        if (candidate) {
-          detectedSKU = candidate;
-          break;
-        }
-      }
+    // If total pieces was not explicitly in the pill line, sum QTY of products
+    const sumQty = products.reduce((acc, p) => acc + (p.qty || 1), 0);
+    if (!totalPieces && sumQty > 0) {
+      totalPieces = `${sumQty} قطع`;
     }
 
-    // Determine Single vs Multi product order
-    let isMultiProduct = false;
-    let totalItemsCount = 0;
+    // Detect embedded SKU in notes or products
+    let sku = '';
+    const fullNotesText = notesLines.join(' ');
+    const skuMatch = fullNotesText.match(/\b([a-zA-Z]{2}\d{3}[a-zA-Z0-9]{2,3})\b/i);
+    if (skuMatch) {
+      sku = skuMatch[1].toUpperCase();
+    }
 
-    if (parsedProducts.length === 0) {
-      isMultiProduct = false;
-      totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : 0;
-    } else if (parsedProducts.length === 1) {
-      isMultiProduct = false;
-      totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : (parsedProducts[0].qty || 1);
+    // Determine category
+    const fullDescText = products.map(p => p.modelName).join(' ');
+    let category = 'other';
+    const hasKids = /اطفال|اطفالي|أطفال|أطفالي/i.test(fullDescText);
+    const hasWomen = /حريمي/i.test(fullDescText);
+
+    if (hasKids && hasWomen) {
+      category = 'multi';
+    } else if (hasKids) {
+      category = 'kids';
+    } else if (hasWomen) {
+      category = 'women';
+    } else if (products.length >= 2) {
+      category = 'multi';
     } else {
-      const first = parsedProducts[0];
-      const allIdentical = parsedProducts.every(p => 
-        p.normalizedModel === first.normalizedModel &&
-        p.normalizedColor === first.normalizedColor &&
-        p.normalizedSize === first.normalizedSize
-      );
-
-      if (allIdentical) {
-        isMultiProduct = false;
-        totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : parsedProducts.reduce((sum, p) => sum + (p.qty || 1), 0);
-      } else {
-        isMultiProduct = true;
-        totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : parsedProducts.reduce((sum, p) => sum + (p.qty || 1), 0);
-      }
+      category = 'other';
     }
 
-    // Fallback totalPieces if not extracted from pill
-    if (!totalPieces && totalItemsCount > 0) {
-      totalPieces = `${totalItemsCount} قطع`;
-    }
-
-    // Primary product for sorting
-    const primaryProduct = parsedProducts.length > 0 ? parsedProducts[0] : null;
-
-    const parsedData = {
-      originalPageNumber: pageNumber,
-      trackingNumber: trackingNumber || `AWB-${pageNumber}`,
-      orderReference: orderReference || trackingNumber || `AWB-${pageNumber}`,
-      totalPieces: totalPieces || `${totalItemsCount} قطع`,
-      city: city || 'غير محدد',
-      rawDescription: descriptionLines.join(' | ') || (lines.slice(0, 5).join(' ') || 'بدون وصف'),
-      rawNotes: combinedNotes || '',
-      products: parsedProducts,
-      primaryProduct: primaryProduct,
-      modelName: primaryProduct ? primaryProduct.modelName : 'غير محدد',
-      color: primaryProduct ? primaryProduct.color : '',
-      size: primaryProduct ? primaryProduct.size : '',
-      normalizedModel: primaryProduct ? primaryProduct.normalizedModel : 'zzzz_unknown',
-      normalizedColor: primaryProduct ? primaryProduct.normalizedColor : 'zzzz',
-      normalizedSize: primaryProduct ? primaryProduct.normalizedSize : 'zzzz',
-      sku: detectedSKU || '',
-      isMultiProduct: isMultiProduct,
-      totalItemsCount: totalItemsCount,
-      hasRecognizedDescription: parsedProducts.length > 0
+    // Multi-product order check
+    const isMultiProduct = products.length >= 2;
+    const primaryProduct = products[0] || {
+      modelName: 'بوليصة غير محددة',
+      color: '',
+      colorCode: '',
+      size: '',
+      qty: 1,
+      normalizedModel: '',
+      normalizedColor: '',
+      normalizedSize: ''
     };
 
-    // Auto assign category: kids, women, other, multi
-    parsedData.category = this.categorizeOrder(parsedData);
-
-    return parsedData;
+    return {
+      originalPageNumber: pageNumber,
+      trackingNumber: trackingNumber || (orderReference ? orderReference : `AWB-${pageNumber}`),
+      orderReference: orderReference || trackingNumber,
+      totalPieces: totalPieces || (sumQty ? `${sumQty} قطع` : '1 قطعة'),
+      city: city || 'مصر',
+      products,
+      isMultiProduct,
+      totalItemsCount: sumQty || 1,
+      hasRecognizedDescription: products.length > 0,
+      modelName: primaryProduct.modelName,
+      color: primaryProduct.color,
+      colorCode: primaryProduct.colorCode,
+      size: primaryProduct.size,
+      sku,
+      category,
+      rawNotes: fullNotesText,
+      rawDescription: products.map(p => p.raw).join('\n'),
+      normalizedModel: primaryProduct.normalizedModel,
+      normalizedColor: primaryProduct.normalizedColor,
+      normalizedSize: primaryProduct.normalizedSize
+    };
   },
 
   /**
-   * Categorizes an order based on product lines and descriptions:
-   * - 'kids': أطفال / Kids
-   * - 'women': حريمي / Women
-   * - 'other': منتجات أخرى / Others (سجاد، إكسسوارات، غير مصنف)
-   * - 'multi': أوردرات متعددة / Multi-item Orders
+   * Helper rank for sorting sizes logically
    */
-  categorizeOrder(item) {
-    if (!item) return 'other';
-
-    if (item.isMultiProduct) {
-      return 'multi';
-    }
-
-    const fullText = (
-      (item.modelName || '') + ' ' +
-      (item.rawDescription || '') + ' ' +
-      (item.products ? item.products.map(p => (p.modelName || '') + ' ' + (p.raw || '')).join(' ') : '')
-    );
-    const normalized = this.normalizeText(fullText);
-
-    // 1. Kids: اطفال, اطفالي, بيبي, ولادي, بناتي (and visual reverse forms)
-    if (
-      normalized.includes('اطفال') ||
-      normalized.includes('اطفالي') ||
-      normalized.includes('بيبي') ||
-      normalized.includes('ولادي') ||
-      normalized.includes('بناتي') ||
-      fullText.includes('يلافطا') ||
-      fullText.includes('لافطا')
-    ) {
-      return 'kids';
-    }
-
-    // 2. Women: حريمي, نسائي, سيدات, اسدال, عبايه
-    if (
-      normalized.includes('حريمي') ||
-      normalized.includes('نسائي') ||
-      normalized.includes('سيدات') ||
-      normalized.includes('اسدال') ||
-      normalized.includes('عبايه') ||
-      fullText.includes('يميرح')
-    ) {
-      return 'women';
-    }
-
-    return 'other';
+  getSizeRank(sizeStr) {
+    if (!sizeStr) return 999;
+    const s = this.normalize(sizeStr);
+    if (s.includes('اول') || s === '1' || s.includes('s')) return 1;
+    if (s.includes('ثاني') || s === '2' || s.includes('m')) return 2;
+    if (s.includes('ثالث') || s === '3' || s.includes('l')) return 3;
+    if (s.includes('رابع') || s === '4' || s.includes('xl')) return 4;
+    return 100;
   },
 
   /**
-   * Get metadata for a given category (label, badge styles)
+   * Category metadata
    */
-  getCategoryMeta(categoryId) {
-    switch (categoryId) {
+  getCategoryMeta(cat) {
+    switch (cat) {
       case 'kids':
-        return {
-          id: 'kids',
-          label: 'أطفال / Kids',
-          badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-        };
+        return { label: '🧸 أطفالي', badgeClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-300 border-amber-500/20' };
       case 'women':
-        return {
-          id: 'women',
-          label: 'حريمي / Women',
-          badgeClass: 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-        };
+        return { label: '👗 حريمي', badgeClass: 'bg-rose-500/10 text-rose-600 dark:text-rose-300 border-rose-500/20' };
       case 'multi':
-        return {
-          id: 'multi',
-          label: 'أوردرات متعددة / Multi-item',
-          badgeClass: 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-        };
-      case 'other':
+        return { label: '🛍️ أوردر متعدد', badgeClass: 'bg-purple-500/10 text-purple-600 dark:text-purple-300 border-purple-500/20' };
       default:
-        return {
-          id: 'other',
-          label: 'منتجات أخرى / Others',
-          badgeClass: 'bg-teal-500/10 text-teal-400 border-teal-500/20'
-        };
+        return { label: '📦 منتجات أخرى', badgeClass: 'bg-teal-500/10 text-teal-600 dark:text-teal-300 border-teal-500/20' };
     }
   }
 };
 
-window.ArabicUtils = ArabicUtils;
+if (typeof window !== 'undefined') {
+  window.ArabicUtils = ArabicUtils;
+}

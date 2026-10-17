@@ -1,12 +1,13 @@
 /**
  * PDF Processing Engine
- * - Extracts text using pdf.js
- * - Performs multi-level sorting (Strategies A, B, C)
- * - Generates & resizes final ready-to-print thermal PDF (75mm x 125mm) using pdf-lib
+ * - In-memory Rubik CMap patching (using pako)
+ * - Text extraction & strict line grouping (tolerance ±2.5 pt, Y descending, X descending)
+ * - Multi-level warehouse sorting (Fast Picking Strategy A, B, C)
+ * - Fast, zero-loss thermal PDF resizing (75mm x 125mm = 212.60 x 354.33 pt)
  */
 
 const PDFProcessor = {
-  // Conversion constant: 1 mm = 2.83464567 PDF points (72 points / 25.4 mm)
+  // Conversion constant: 1 mm = 2.83464567 PDF points (72 pt / 25.4 mm)
   MM_TO_PT: 2.83464567,
 
   /**
@@ -20,16 +21,22 @@ const PDFProcessor = {
   },
 
   /**
-   * Extract text and metadata from all pages in the PDF
+   * Extract text and metadata from all pages in the PDF with CMap recovery
    */
   async extractPages(arrayBuffer, onProgress) {
     this.initPdfJs();
 
-    // Clone buffer safely before passing to pdf.js to prevent worker detachment
+    // 1. Safe clone
     const safeBuffer = arrayBuffer.slice(0);
 
+    // 2. Patch /ToUnicode CMaps in memory using Rubik glyph table if pako is available
+    let bufferToLoad = safeBuffer;
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.patchPdfCMap === 'function') {
+      bufferToLoad = ArabicUtils.patchPdfCMap(safeBuffer);
+    }
+
     const loadingTask = pdfjsLib.getDocument({
-      data: safeBuffer,
+      data: bufferToLoad,
       cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
       cMapPacked: true
     });
@@ -50,8 +57,8 @@ const PDFProcessor = {
 
       const page = await pdfDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      
-      // Group text items into lines based on Y coordinate (ty)
+
+      // Group text items into lines based on Y coordinate (tolerance ±2.5 pt)
       const items = textContent.items.map(item => ({
         str: item.str,
         x: item.transform[4],
@@ -60,9 +67,8 @@ const PDFProcessor = {
         height: item.height
       }));
 
-      // Sort items by Y descending (top to bottom)
-      // Group items within a threshold (~4-5 pt) into the same line
-      items.sort((a, b) => b.y - a.y || a.x - b.x);
+      // Sort items top-to-bottom (Y descending)
+      items.sort((a, b) => b.y - a.y || b.x - a.x);
 
       const lines = [];
       let currentLine = [];
@@ -71,10 +77,10 @@ const PDFProcessor = {
       for (const item of items) {
         if (!item.str || item.str.trim() === '') continue;
 
-        if (currentY === null || Math.abs(item.y - currentY) > 5) {
+        if (currentY === null || Math.abs(item.y - currentY) > 2.5) {
           if (currentLine.length > 0) {
-            // Sort line horizontally (for Arabic/RTL, preserve logical reading)
-            currentLine.sort((a, b) => a.x - b.x);
+            // Sort line horizontally (for Arabic RTL: X descending, right-to-left)
+            currentLine.sort((a, b) => b.x - a.x);
             lines.push(currentLine.map(i => i.str).join(' '));
           }
           currentLine = [item];
@@ -85,17 +91,17 @@ const PDFProcessor = {
       }
 
       if (currentLine.length > 0) {
-        currentLine.sort((a, b) => a.x - b.x);
+        currentLine.sort((a, b) => b.x - a.x);
         lines.push(currentLine.map(i => i.str).join(' '));
       }
 
-      // Parse Bosta Arabic format
+      // Parse Bosta Arabic format strictly
       const parsed = ArabicUtils.parseBostaPage(lines, pageNum);
 
-      // If inventory data is available, enrich with SKU matching
+      // If inventory sheet was loaded, enrich with SKU matching
       if (typeof InventoryParser !== 'undefined' && InventoryParser.inventoryItems.length > 0) {
-        if (!parsed.sku && parsed.primaryProduct) {
-          const match = InventoryParser.matchProduct(parsed.primaryProduct);
+        if (!parsed.sku && parsed.modelName) {
+          const match = InventoryParser.matchProduct(parsed.modelName);
           if (match && match.sku) {
             parsed.sku = match.sku;
             parsed.matchedInventory = match;
@@ -110,53 +116,41 @@ const PDFProcessor = {
   },
 
   /**
-   * Sort pages according to selected strategy
-   * @param {Array} pages - list of parsed page objects
-   * @param {String} strategy - 'A', 'B', or 'C'
+   * Sort pages according to warehouse picking strategies
    */
   sortPages(pages, strategy = 'A') {
     const list = [...pages];
-
-    // Arabic locale comparator for strings
     const arCollator = new Intl.Collator('ar', { numeric: true, sensitivity: 'base' });
 
     list.sort((a, b) => {
-      // Rule: Unrecognized/empty pages are always pushed to the very end
+      // Unrecognized/empty pages are pushed to the end
       if (!a.hasRecognizedDescription && b.hasRecognizedDescription) return 1;
       if (a.hasRecognizedDescription && !b.hasRecognizedDescription) return -1;
       if (!a.hasRecognizedDescription && !b.hasRecognizedDescription) {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy A (Fast Picking):
-      // 1. Single-product orders first, Multi-product orders second
+      // Strategy A (Fast Warehouse Picking):
+      // 1. Single-product orders first, Multi-product orders at the end
       // 2. Alphabetically by Model Name
       // 3. Alphabetically by Color
-      // 4. Alphabetically by Size
+      // 4. By Size rank (الأول -> الثاني -> الثالث -> الرابع)
       // 5. Quantity
       if (strategy === 'A') {
         if (a.isMultiProduct !== b.isMultiProduct) {
-          // false (single) comes before true (multi)
           return a.isMultiProduct ? 1 : -1;
         }
 
-        // Compare Base Model Name
         const modelCmp = arCollator.compare(a.normalizedModel, b.normalizedModel);
         if (modelCmp !== 0) return modelCmp;
 
-        // Compare Color
         const colorCmp = arCollator.compare(a.normalizedColor, b.normalizedColor);
         if (colorCmp !== 0) return colorCmp;
 
-        // Compare Size with intelligent size ranking (الأول -> الثاني -> الثالث or S -> M -> L)
         const rankA = ArabicUtils.getSizeRank(a.normalizedSize);
         const rankB = ArabicUtils.getSizeRank(b.normalizedSize);
         if (rankA !== rankB) return rankA - rankB;
 
-        const sizeCmp = arCollator.compare(a.normalizedSize, b.normalizedSize);
-        if (sizeCmp !== 0) return sizeCmp;
-
-        // Compare Item Count / Quantity
         if (a.totalItemsCount !== b.totalItemsCount) {
           return a.totalItemsCount - b.totalItemsCount;
         }
@@ -164,8 +158,7 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy B (All Orders by First Product):
-      // Group everything by Product -> Color -> Size regardless of single/multi
+      // Strategy B (All Orders grouped by First Product regardless of single/multi)
       if (strategy === 'B') {
         const modelCmp = arCollator.compare(a.normalizedModel, b.normalizedModel);
         if (modelCmp !== 0) return modelCmp;
@@ -177,9 +170,6 @@ const PDFProcessor = {
         const rankB = ArabicUtils.getSizeRank(b.normalizedSize);
         if (rankA !== rankB) return rankA - rankB;
 
-        const sizeCmp = arCollator.compare(a.normalizedSize, b.normalizedSize);
-        if (sizeCmp !== 0) return sizeCmp;
-
         if (a.isMultiProduct !== b.isMultiProduct) {
           return a.isMultiProduct ? 1 : -1;
         }
@@ -187,8 +177,7 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy C (Sort by SKU):
-      // Sort by detected SKU / inventory priority order
+      // Strategy C (Sort by SKU / Inventory Order)
       if (strategy === 'C') {
         const hasSkuA = Boolean(a.sku);
         const hasSkuB = Boolean(b.sku);
@@ -197,7 +186,6 @@ const PDFProcessor = {
         if (!hasSkuA && hasSkuB) return 1;
 
         if (hasSkuA && hasSkuB) {
-          // Check inventory sequence priority if available
           if (typeof InventoryParser !== 'undefined' && InventoryParser.skuPriorityOrder.size > 0) {
             const prioA = InventoryParser.getSKUPriority(a.sku);
             const prioB = InventoryParser.getSKUPriority(b.sku);
@@ -207,12 +195,8 @@ const PDFProcessor = {
           if (skuCmp !== 0) return skuCmp;
         }
 
-        // Fallback to Model Name then Color
         const modelCmp = arCollator.compare(a.normalizedModel, b.normalizedModel);
         if (modelCmp !== 0) return modelCmp;
-
-        const colorCmp = arCollator.compare(a.normalizedColor, b.normalizedColor);
-        if (colorCmp !== 0) return colorCmp;
 
         return a.originalPageNumber - b.originalPageNumber;
       }
@@ -220,7 +204,6 @@ const PDFProcessor = {
       return a.originalPageNumber - b.originalPageNumber;
     });
 
-    // Assign new sequential page numbers
     return list.map((item, idx) => ({
       ...item,
       newPageNumber: idx + 1
@@ -228,16 +211,16 @@ const PDFProcessor = {
   },
 
   /**
-   * Generates final sorted and resized PDF
-   * Uses pdf-lib copyPages for robust vector fidelity and exact thermal dimensions (75mm x 125mm)
+   * Generates final sorted and resized PDF (75mm x 125mm = 212.60 x 354.33 pt)
+   * Instantaneous zero-loss output when page is already ~212.6 x 354.3 pt
    */
-  async generateSortedPDF(originalPdfBytes, sortedPages, options = {}, onProgress) {
+  async generateSortedPDF(masterPdfBytes, sortedPages, options = {}, onProgress) {
     if (typeof PDFLib === 'undefined') {
       throw new Error('مكتبة pdf-lib غير محملة. يرجى التأكد من اتصال الإنترنت.');
     }
 
-    if (!originalPdfBytes || originalPdfBytes.byteLength === 0) {
-      throw new Error('بيانات ملف الـ PDF الأصلي فارغة أو غير متوفرة.');
+    if (!masterPdfBytes || masterPdfBytes.byteLength === 0) {
+      throw new Error('بيانات ملف الـ PDF الأصلي غير متوفرة.');
     }
 
     if (!sortedPages || sortedPages.length === 0) {
@@ -255,14 +238,12 @@ const PDFProcessor = {
     const targetHeightPt = heightMm * this.MM_TO_PT; // ~354.33 pt
 
     try {
-      // Safe clone of original buffer so it is never detached or corrupted
-      const safeBuffer = originalPdfBytes.slice(0);
-
-      const sourceDoc = await PDFLib.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
-      const targetDoc = await PDFLib.PDFDocument.create();
+      const safeBuffer = masterPdfBytes.slice(0);
+      const srcDoc = await PDFLib.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
+      const outDoc = await PDFLib.PDFDocument.create();
 
       const sortedIndices = sortedPages.map(p => p.originalPageNumber - 1);
-      const copiedPages = await targetDoc.copyPages(sourceDoc, sortedIndices);
+      const copiedPages = await outDoc.copyPages(srcDoc, sortedIndices);
 
       const total = copiedPages.length;
 
@@ -272,42 +253,37 @@ const PDFProcessor = {
             current: i + 1,
             total: total,
             percent: Math.round(((i + 1) / total) * 100),
-            phase: 'تجهيز وتغيير حجم بوالص الشحن للحجم الحراري (75×125 ملم)'
+            phase: 'تجهيز صفحات الطباعة الحرارية (75×125 ملم)'
           });
         }
 
         const page = copiedPages[i];
+        const { width: origW, height: origH } = page.getSize();
 
-        if (resize) {
-          const { width: origWidth, height: origHeight } = page.getSize();
+        // Check if page is already thermal size ~212.6 x 354.3 pt (within ±3 pt)
+        const isAlreadyThermal = Math.abs(origW - targetWidthPt) <= 4 && Math.abs(origH - targetHeightPt) <= 4;
 
+        if (resize && !isAlreadyThermal) {
           if (keepAspectRatio) {
-            // Proportional scale to fit inside 75x125 mm
-            const scale = Math.min(targetWidthPt / origWidth, targetHeightPt / origHeight);
+            const scale = Math.min(targetWidthPt / origW, targetHeightPt / origH);
             page.scale(scale, scale);
             page.setSize(targetWidthPt, targetHeightPt);
 
-            // Centering inside the thermal page
-            const scaledWidth = origWidth * scale;
-            const scaledHeight = origHeight * scale;
-            const xOffset = (targetWidthPt - scaledWidth) / 2;
-            const yOffset = (targetHeightPt - scaledHeight) / 2;
+            const scaledW = origW * scale;
+            const scaledH = origH * scale;
+            const xOffset = (targetWidthPt - scaledW) / 2;
+            const yOffset = (targetHeightPt - scaledH) / 2;
             page.translateContent(xOffset, yOffset);
           } else {
-            // Direct stretch
-            const scaleX = targetWidthPt / origWidth;
-            const scaleY = targetHeightPt / origHeight;
-            page.scale(scaleX, scaleY);
+            page.scale(targetWidthPt / origW, targetHeightPt / origH);
             page.setSize(targetWidthPt, targetHeightPt);
           }
         }
 
-        targetDoc.addPage(page);
+        outDoc.addPage(page);
       }
 
-      // Save and return final PDF bytes
-      const outputPdfBytes = await targetDoc.save();
-      return outputPdfBytes;
+      return await outDoc.save();
     } catch (err) {
       console.error('Error generating PDF:', err);
       throw new Error(`فشل إنشاء ملف الـ PDF: ${err.message || err}`);
@@ -317,9 +293,11 @@ const PDFProcessor = {
   /**
    * Generates a single-page thermal PDF for quick individual printing
    */
-  async generateSinglePagePDF(originalPdfBytes, originalPageNumber, options = {}) {
-    return this.generateSortedPDF(originalPdfBytes, [{ originalPageNumber }], options);
+  async generateSinglePagePDF(masterPdfBytes, originalPageNumber, options = {}) {
+    return this.generateSortedPDF(masterPdfBytes, [{ originalPageNumber }], options);
   }
 };
 
-window.PDFProcessor = PDFProcessor;
+if (typeof window !== 'undefined') {
+  window.PDFProcessor = PDFProcessor;
+}

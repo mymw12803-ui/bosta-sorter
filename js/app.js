@@ -113,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     modalPdfCanvas: document.getElementById('modal-pdf-canvas'),
     modalCanvasLoading: document.getElementById('modal-canvas-loading'),
     modalPrintSingleBtn: document.getElementById('modal-print-single-btn'),
+    modalDownloadSingleBtn: document.getElementById('modal-download-single-btn'),
 
     // Technical Error Modal
     errorModal: document.getElementById('error-modal'),
@@ -125,9 +126,9 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   /**
-   * Initialize Theme (Light / Dark mode)
+   * Initialize Theme (Light / Dark mode) - Default to crisp high-contrast Light mode for warehouse
    */
-  const savedTheme = localStorage.getItem('bosta_sorter_theme') || 'dark';
+  const savedTheme = localStorage.getItem('bosta_sorter_theme') || 'light';
   applyTheme(savedTheme);
 
   function applyTheme(theme) {
@@ -260,8 +261,9 @@ document.addEventListener('DOMContentLoaded', () => {
     state.pdfFile = file;
     state.pdfFileName = file.name;
     const arrayBuffer = await file.arrayBuffer();
-    // Keep a safe clone of ArrayBuffer so worker operations never detach or neuter it
-    state.pdfArrayBuffer = arrayBuffer.slice(0);
+    // Keep clean untouched Uint8Array copy as specified
+    state.masterPdfBytes = new Uint8Array(arrayBuffer);
+    state.pdfArrayBuffer = state.masterPdfBytes.slice(0).buffer;
 
     elements.pdfFileName.textContent = file.name;
     elements.pdfFileSize.textContent = formatFileSize(file.size);
@@ -608,36 +610,39 @@ document.addEventListener('DOMContentLoaded', () => {
       // Badge for Single vs Multi
       let orderTypeBadge = '';
       if (!item.hasRecognizedDescription) {
-        orderTypeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20">غير محدد</span>';
+        orderTypeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20">غير محدد</span>';
       } else if (item.isMultiProduct) {
-        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">متعدد (${item.products.length} أصناف)</span>`;
+        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">متعدد (${item.products.length} أصناف)</span>`;
       } else {
-        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/20">قطعة واحدة</span>`;
-      }
-
-      // Color & Size display
-      let variantDisplay = '';
-      if (item.color || item.size) {
-        variantDisplay = `
-          <div class="flex items-center gap-1.5 flex-wrap">
-            ${item.color ? `<span class="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs">${item.color}</span>` : ''}
-            ${item.size ? `<span class="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-mono font-medium">${item.size}</span>` : ''}
-          </div>
-        `;
-      } else {
-        variantDisplay = `<span class="text-xs text-slate-400">-</span>`;
+        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/20">صنف واحد</span>`;
       }
 
       // Total Pieces Count
-      const totalPiecesDisplay = item.totalPieces || (item.totalItemsCount ? `${item.totalItemsCount} قطع` : '-');
+      const totalPiecesDisplay = item.totalPieces || (item.totalItemsCount ? `${item.totalItemsCount} قطع` : '1 قطعة');
 
       // Reference / AWB display
-      const refCode = item.orderReference || item.trackingNumber;
+      const refCode = item.orderReference || item.trackingNumber || '-';
+
+      // Clean list of all products in the order, showing Model Name + Color + Size + (QTY X) for each line
+      let productsListHtml = '';
+      if (item.products && item.products.length > 0) {
+        productsListHtml = item.products.map(p => {
+          const parts = [];
+          parts.push(`<span class="font-bold text-slate-900 dark:text-white">${p.modelName}</span>`);
+          if (p.color) parts.push(`<span class="px-1.5 py-0.2 rounded bg-slate-200/80 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-[11px]">${p.color}${p.colorCode ? ' (' + p.colorCode + ')' : ''}</span>`);
+          if (p.size) parts.push(`<span class="px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-mono font-medium">${p.size}</span>`);
+          parts.push(`<span class="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold font-mono">(QTY ${p.qty || 1})</span>`);
+          if (p.sku) parts.push(`<span class="font-mono text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-300 px-1 py-0.2 rounded border border-sky-500/20 font-semibold">${p.sku}</span>`);
+          return `<div class="flex items-center gap-1.5 flex-wrap py-0.5">${parts.join(' ')}</div>`;
+        }).join('');
+      } else {
+        productsListHtml = `<div class="text-xs text-slate-700 dark:text-slate-300 font-medium">${item.modelName || item.rawDescription || '-'}</div>`;
+      }
 
       tr.innerHTML = `
         <td class="px-2 py-3 text-center">
           <span class="drag-handle cursor-grab active:cursor-grabbing text-slate-400 hover:text-teal-500 text-base font-bold select-none p-1 inline-block" title="اسحب لإعادة الترتيب يدويًا">
-            ⋮⋮
+            ☰
           </span>
         </td>
         <td class="px-3 py-3 font-mono font-bold text-teal-600 dark:text-teal-400 new-page-num whitespace-nowrap">
@@ -646,39 +651,34 @@ document.addEventListener('DOMContentLoaded', () => {
         <td class="px-3 py-3 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
           ${item.originalPageNumber}
         </td>
-        <td class="px-3 py-3 text-center whitespace-nowrap">
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-            ${totalPiecesDisplay}
-          </span>
-        </td>
-        <td class="px-4 py-3">
-          <div class="font-medium text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <span>${item.modelName}</span>
-          </div>
-          <div class="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-            ${categoryBadge}
-            ${item.sku ? `<span class="font-mono bg-sky-500/10 text-sky-600 dark:text-sky-300 px-1.5 py-0.2 rounded border border-sky-500/20 font-semibold">${item.sku}</span>` : ''}
-          </div>
-        </td>
-        <td class="px-3 py-3 whitespace-nowrap">
-          ${variantDisplay}
-        </td>
         <td class="px-4 py-3">
           <div class="font-mono text-xs font-bold text-slate-800 dark:text-slate-200">${refCode}</div>
-          <div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
-            ${item.trackingNumber && item.orderReference && item.orderReference !== item.trackingNumber ? `<span>${item.trackingNumber}</span><span>•</span>` : ''}
+          <div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+            ${item.trackingNumber && item.orderReference && item.orderReference !== item.trackingNumber ? `<span class="font-mono">${item.trackingNumber}</span><span>•</span>` : ''}
             <span>${item.city || '-'}</span>
           </div>
         </td>
-        <td class="px-3 py-3 whitespace-nowrap">
-          ${orderTypeBadge}
+        <td class="px-3 py-3 text-center whitespace-nowrap">
+          <div class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 mb-1">
+            ${totalPiecesDisplay}
+          </div>
+          <div>
+            ${orderTypeBadge}
+          </div>
+        </td>
+        <td class="px-4 py-3">
+          ${productsListHtml}
         </td>
         <td class="px-3 py-3 text-center whitespace-nowrap">
-          <button class="view-detail-btn p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-teal-600 dark:text-slate-400 dark:hover:text-white transition" title="معاينة الورقة الأصلية" data-original-page="${item.originalPageNumber}">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          ${categoryBadge}
+        </td>
+        <td class="px-3 py-3 text-center whitespace-nowrap">
+          <button class="view-detail-btn px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 hover:text-teal-600 dark:text-slate-300 dark:hover:text-white transition flex items-center justify-center gap-1 mx-auto text-xs font-medium" title="معاينة الورقة الأصلية" data-original-page="${item.originalPageNumber}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
+            <span>معاينة</span>
           </button>
         </td>
       `;
@@ -862,14 +862,45 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.detailModal.classList.remove('hidden');
   }
 
+  // Download single page button in modal
+  if (elements.modalDownloadSingleBtn) {
+    elements.modalDownloadSingleBtn.addEventListener('click', async () => {
+      if (!activeModalItem) return;
+      await exportBatchPDF(
+        [activeModalItem],
+        `Bosta_Single_${activeModalItem.orderReference || activeModalItem.trackingNumber || activeModalItem.originalPageNumber}`
+      );
+    });
+  }
+
   // Print single page button in modal
   if (elements.modalPrintSingleBtn) {
     elements.modalPrintSingleBtn.addEventListener('click', async () => {
       if (!activeModalItem) return;
-      await exportBatchPDF(
-        [activeModalItem],
-        `Bosta_Single_${activeModalItem.trackingNumber || activeModalItem.originalPageNumber}`
-      );
+      try {
+        const masterBuffer = (state.masterPdfBytes || new Uint8Array(state.pdfArrayBuffer)).slice(0);
+        const singleBytes = await PDFProcessor.generateSinglePagePDF(
+          masterBuffer,
+          activeModalItem.originalPageNumber,
+          {
+            resize: state.resizeEnabled,
+            widthMm: state.widthMm,
+            heightMm: state.heightMm,
+            keepAspectRatio: state.keepAspectRatio
+          }
+        );
+        const blob = new Blob([singleBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const printWin = window.open(url, '_blank');
+        if (printWin) {
+          printWin.focus();
+        } else {
+          await exportBatchPDF([activeModalItem], `Bosta_Single_Print_${activeModalItem.orderReference || activeModalItem.trackingNumber || activeModalItem.originalPageNumber}`);
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (err) {
+        showErrorModal(`خطأ في طباعة الصفحة: ${err.message}`);
+      }
     });
   }
 
@@ -893,7 +924,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (!state.pdfArrayBuffer || state.pdfArrayBuffer.byteLength === 0) {
+    if ((!state.masterPdfBytes || state.masterPdfBytes.byteLength === 0) && (!state.pdfArrayBuffer || state.pdfArrayBuffer.byteLength === 0)) {
       showErrorModal('بيانات ملف الـ PDF الأصلي غير متوفرة أو تم فقدها في الذاكرة. يرجى إعادة رفع الملف.');
       return;
     }
@@ -902,11 +933,12 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.downloadStickyBtn.disabled = true;
     if (elements.downloadFilteredBtn) elements.downloadFilteredBtn.disabled = true;
     if (elements.modalPrintSingleBtn) elements.modalPrintSingleBtn.disabled = true;
+    if (elements.modalDownloadSingleBtn) elements.modalDownloadSingleBtn.disabled = true;
     elements.progressSection.classList.remove('hidden');
 
     try {
-      // Safe clone of ArrayBuffer so it is never detached or corrupted
-      const safeBuffer = state.pdfArrayBuffer.slice(0);
+      // Safe clone of untouched master bytes so worker/pdf-lib operations never detach or neuter it
+      const safeBuffer = (state.masterPdfBytes ? state.masterPdfBytes.slice(0) : new Uint8Array(state.pdfArrayBuffer).slice(0));
 
       const generatedBytes = await PDFProcessor.generateSortedPDF(
         safeBuffer,
