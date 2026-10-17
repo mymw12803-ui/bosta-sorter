@@ -458,11 +458,11 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.statSinglePercent.textContent = `${singlePercent}% من الشحنات`;
     elements.statMultiPercent.textContent = `${multiPercent}% من الشحنات`;
 
-    // Batch Category Counters
-    const countKids = state.sortedPages.filter(p => p.category === 'kids').length;
-    const countWomen = state.sortedPages.filter(p => p.category === 'women').length;
-    const countOther = state.sortedPages.filter(p => p.category === 'other').length;
-    const countMulti = state.sortedPages.filter(p => p.category === 'multi').length;
+    // Batch Category Counters (Space-Immune)
+    const countKids = state.sortedPages.filter(p => p.isKids).length;
+    const countWomen = state.sortedPages.filter(p => p.isWomen).length;
+    const countOther = state.sortedPages.filter(p => p.isOther).length;
+    const countMulti = state.sortedPages.filter(p => p.isMulti).length;
 
     if (elements.batchCountKids) elements.batchCountKids.textContent = `${countKids} بوليصة`;
     if (elements.batchCountWomen) elements.batchCountWomen.textContent = `${countWomen} بوليصة`;
@@ -475,6 +475,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (elements.downloadMultiBtn) elements.downloadMultiBtn.disabled = countMulti === 0;
 
     if (elements.totalDownloadCount) elements.totalDownloadCount.textContent = total;
+
+    // Update filter tab button labels with live counts
+    elements.filterBtns.forEach(btn => {
+      const f = btn.dataset.filter;
+      if (f === 'all') btn.textContent = `الكل (${total})`;
+      else if (f === 'kids') btn.textContent = `🧸 قسم الأطفالي فقط (${countKids})`;
+      else if (f === 'women') btn.textContent = `👗 قسم الحريمي فقط (${countWomen})`;
+      else if (f === 'other') btn.textContent = `📦 قسم منتجات أخرى (${countOther})`;
+      else if (f === 'single') btn.textContent = `🏷️ طلبات الصنف الواحد (${singleOrders})`;
+      else if (f === 'multi') btn.textContent = `🛍️ طلبات متعددة الأصناف (${multiOrders})`;
+    });
   }
 
   // Sortable instance reference
@@ -538,32 +549,37 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * Render Preview Table with 9 Enhanced Columns, Search & Category Filters
+   * Render Preview Table with 8 Enhanced Columns, Search & Space-Immune Category Filters
    */
   function renderTable() {
-    const query = ArabicUtils.normalizeText(state.searchQuery);
+    // 100% Space-Immune query normalizer
+    const query = ArabicUtils.normalizeArabic(state.searchQuery);
 
     const filtered = state.sortedPages.filter(item => {
-      // Category & Tab Filter
-      if (state.activeFilter === 'kids' && item.category !== 'kids') return false;
-      if (state.activeFilter === 'women' && item.category !== 'women') return false;
-      if (state.activeFilter === 'other' && item.category !== 'other') return false;
-      if (state.activeFilter === 'multi' && item.category !== 'multi') return false;
-      if (state.activeFilter === 'single' && (item.isMultiProduct || !item.hasRecognizedDescription)) return false;
+      // Category & Tab Filter (Space-Immune flags)
+      if (state.activeFilter === 'kids' && !item.isKids) return false;
+      if (state.activeFilter === 'women' && !item.isWomen) return false;
+      if (state.activeFilter === 'other' && !item.isOther) return false;
+      if (state.activeFilter === 'multi' && !item.isMulti) return false;
+      if (state.activeFilter === 'single' && !item.isSingle) return false;
       if (state.activeFilter === 'unknown' && item.hasRecognizedDescription) return false;
 
-      // Quick Search Query (colors e.g. "اسود", "كشمير", keywords, SKU, tracking, city)
+      // Quick Search Query: 100% Space-Immune comparison across all order data
       if (query) {
-        const matchesModel = item.normalizedModel.includes(query) || item.modelName.includes(query);
-        const matchesColor = item.normalizedColor.includes(query) || item.color.includes(query);
-        const matchesSize = item.normalizedSize.includes(query) || item.size.includes(query);
-        const matchesSku = item.sku.toLowerCase().includes(query);
-        const matchesTracking = item.trackingNumber.toLowerCase().includes(query);
-        const matchesRef = (item.orderReference || '').toLowerCase().includes(query);
-        const matchesCity = item.city.includes(query);
-        const matchesRaw = (item.rawDescription || '').toLowerCase().includes(query);
+        const fullSearchable = ArabicUtils.normalizeArabic(
+          (item.modelName || '') + ' ' +
+          (item.products ? item.products.map(p => `${p.modelName} ${p.color || ''} ${p.colorCode || ''} ${p.size || ''} ${p.sku || ''}`).join(' ') : '') + ' ' +
+          (item.color || '') + ' ' +
+          (item.size || '') + ' ' +
+          (item.sku || '') + ' ' +
+          (item.orderReference || '') + ' ' +
+          (item.trackingNumber || '') + ' ' +
+          (item.city || '') + ' ' +
+          (item.rawDescription || '') + ' ' +
+          (item.rawNotes || '')
+        );
 
-        return matchesModel || matchesColor || matchesSize || matchesSku || matchesTracking || matchesRef || matchesCity || matchesRaw;
+        return fullSearchable.includes(query);
       }
 
       return true;

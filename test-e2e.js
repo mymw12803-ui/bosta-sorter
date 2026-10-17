@@ -53,6 +53,22 @@ async function runE2ETest() {
   const match2 = ArabicUtils.matchWarehouseModel(testDegraded2);
   console.log(`   Degraded input: "${testDegraded2}" -> Matched: "${match2}" (Expected: "خمار بيليسيه حريمي") -> ${match2 === 'خمار بيليسيه حريمي' ? 'PASS' : 'FAIL'}`);
 
+  // Test Space-Immune Arabic Normalization & Words Reconstruction
+  const spacedStr = 'ا س د ا ل  ب ج ي و ب  ا ط ف ا ل ي';
+  const normSpaced = ArabicUtils.normalizeArabic(spacedStr);
+  console.log(`   normalizeArabic("${spacedStr}") = "${normSpaced}" -> ${normSpaced === 'اسدالبجيوباطفالي' ? 'PASS' : 'FAIL'}`);
+
+  // Test Space-Immune Product Line Parser
+  const spacedLine = 'ا س د ا ل  ب ج ي و ب  ا ط ف ا ل ي - م ي ن ت  غ ا م ق (V1) / ال ا و ل (QTY 3)';
+  const parsedSpaced = ArabicUtils.parseProductLine(spacedLine);
+  console.log(`   Space-Immune line: Model="${parsedSpaced.modelName}", Color="${parsedSpaced.color}", Code="${parsedSpaced.colorCode}", Size="${parsedSpaced.size}", Qty=${parsedSpaced.qty}`);
+  const isSpacedLinePass = parsedSpaced.modelName === 'اسدال بجيوب اطفالي' &&
+                           parsedSpaced.color === 'مينت غامق' &&
+                           parsedSpaced.colorCode === 'V1' &&
+                           parsedSpaced.size === 'الأول' &&
+                           parsedSpaced.qty === 3;
+  console.log(`   Space-Immune Line Parsing: ${isSpacedLinePass ? 'PASS (100% Exact Match)' : 'FAIL'}`);
+
   // Test Variant Code & Color parsing
   const parsedColor = ArabicUtils.parseColorAndCode('اسود (Z1)');
   console.log(`   Color test "اسود (Z1)": Color="${parsedColor.color}", Code="${parsedColor.code}" -> ${parsedColor.color === 'اسود' && parsedColor.code === 'Z1' ? 'PASS' : 'FAIL'}`);
@@ -132,8 +148,13 @@ async function runE2ETest() {
   console.log(`   Women Batch PDF: ${womenDoc.getPageCount()} pages (Expected: ${womenOrders.length}), Size: ${womenPdfBytes.length} bytes -> PASS`);
 
   console.log('7. Testing Quick Search / SKU Filter: Filter for "اسود" (Black color)...');
-  const blackOrders = sorted.filter(p => p.normalizedColor.includes(ArabicUtils.normalizeText('اسود')) || p.color.includes('اسود'));
-  console.log(`   Found ${blackOrders.length} orders matching "اسود"`);
+  const blackOrders = sorted.filter(p => {
+    const fullSearchable = ArabicUtils.normalizeArabic(
+      (p.modelName || '') + ' ' + (p.color || '') + ' ' + (p.sku || '') + ' ' + (p.orderReference || '')
+    );
+    return fullSearchable.includes(ArabicUtils.normalizeArabic('ا س و د'));
+  });
+  console.log(`   Found ${blackOrders.length} orders matching spaced query "ا س و د" (Expected: 2) -> ${blackOrders.length === 2 ? 'PASS' : 'FAIL'}`);
   const blackPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, blackOrders, {
     resize: true,
     widthMm: 75,

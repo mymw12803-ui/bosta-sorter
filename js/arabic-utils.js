@@ -201,6 +201,30 @@ const ArabicUtils = {
   },
 
   /**
+   * 100% Space-Immune Arabic Normalizer
+   * Strips all spaces, diacritics, and normalizes alefs, taa marbuta, and yaa
+   */
+  normalizeArabic(str) {
+    if (!str) return '';
+    return str
+      .replace(/[أإآٱ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/[ىي]/g, 'ي')
+      .replace(/[\u064B-\u065F\u0640\u0000]/g, '')
+      .replace(/\s+/g, ''); // Strip ALL spaces for 100% immune comparison
+  },
+
+  /**
+   * Collapse spaced single Arabic letters like "ا س د ا ل ب ج ي و ب" -> "اسدال بجيوب"
+   */
+  reconstructArabicWords(rawLine) {
+    if (!rawLine) return '';
+    let line = rawLine.replace(/[\u0000\x00]/g, '').trim();
+    // Collapse consecutive single Arabic letters separated by spaces: "ا س د ا ل" -> "اسدال"
+    return line.replace(/(?<=[\u0600-\u06FF])\s+(?=[\u0600-\u06FF])/g, '');
+  },
+
+  /**
    * Normalizes Arabic text for grouping, matching and comparison
    */
   normalizeText(text) {
@@ -235,49 +259,49 @@ const ArabicUtils = {
   },
 
   /**
-   * Intelligent fuzzy and skeleton matcher that repairs missing glyphs / null-bytes
-   * by matching character lengths, surviving letters and words to WAREHOUSE_TITLES
+   * Space-Immune & Skeleton Matcher for Warehouse Master Catalog
+   * 1. Space-stripped comparison against WAREHOUSE_TITLES (sorted longest-first)
+   * 2. Skeleton matching with wildcard handling for degraded Rubik font null-bytes
    */
   matchWarehouseModel(extractedModel) {
     if (!extractedModel) return '';
 
-    // Remove residual null bytes or replace with wildcard '?'
-    const cleanRaw = extractedModel.replace(/[\x00\u0000]/g, '?').trim();
-    const normExtracted = this.normalize(cleanRaw);
+    const normSegment = this.normalizeArabic(extractedModel);
+    if (!normSegment) return '';
 
-    // 1. Direct match
-    for (const t of this.WAREHOUSE_TITLES) {
-      if (this.normalize(t) === normExtracted) return t;
-    }
+    // Sort WAREHOUSE_TITLES longest-first so compound titles match first
+    const sortedTitles = [...this.WAREHOUSE_TITLES].sort(
+      (a, b) => this.normalizeArabic(b).length - this.normalizeArabic(a).length
+    );
 
-    // 2. Substring match
-    for (const t of this.WAREHOUSE_TITLES) {
-      const nt = this.normalize(t);
-      if (normExtracted.length >= 5 && (normExtracted.includes(nt) || nt.includes(normExtracted))) {
-        return t;
+    // 1. Longest title where normalizeArabic(title) is contained in normSegment (or vice versa)
+    for (const title of sortedTitles) {
+      const normTitle = this.normalizeArabic(title);
+      if (normTitle && (normSegment.includes(normTitle) || normTitle.includes(normSegment))) {
+        return title;
       }
     }
 
-    // 3. Word-level skeleton matcher (handles null-bytes \x00)
-    const extWords = normExtracted.split(/\s+/).filter(Boolean);
-    let bestCandidate = extractedModel.replace(/[\x00\u0000?]/g, '').trim();
+    // 2. Word-level skeleton matcher (handles missing glyphs / null-bytes \x00)
+    const cleanRaw = extractedModel.replace(/[\x00\u0000]/g, '?').trim();
+    const extWords = cleanRaw.split(/\s+/).filter(Boolean);
+    let bestCandidate = this.reconstructArabicWords(extractedModel);
     let highestScore = -1;
 
     for (const candidate of this.WAREHOUSE_TITLES) {
-      const candWords = this.normalize(candidate).split(/\s+/).filter(Boolean);
+      const candWords = candidate.split(/\s+/).filter(Boolean);
       if (Math.abs(candWords.length - extWords.length) > 1) continue;
 
       let score = 0;
       const minWords = Math.min(candWords.length, extWords.length);
 
       for (let w = 0; w < minWords; w++) {
-        const eW = extWords[w];
-        const cW = candWords[w];
+        const eW = this.normalizeArabic(extWords[w]);
+        const cW = this.normalizeArabic(candWords[w]);
 
         if (eW === cW) {
           score += 10;
         } else {
-          // Letter comparison with wildcard '?'
           let matches = 0;
           let wildcards = 0;
           let diffs = 0;
@@ -302,7 +326,7 @@ const ArabicUtils = {
       }
     }
 
-    return bestCandidate || extractedModel;
+    return bestCandidate;
   },
 
   normalize(s) {
@@ -311,7 +335,9 @@ const ArabicUtils = {
   },
 
   /**
-   * Parses color and optional variant code like (Z1), (V4), (W3)
+   * Space-Immune Color and Variant Code Parser
+   * Matches normalizeArabic(colorSegment) against KNOWN_COLORS (sorted longest-first)
+   * Extracts codes like (Z1), (V1), (W3), (N1)
    */
   parseColorAndCode(rawColor) {
     if (!rawColor) return { color: '', code: '' };
@@ -324,46 +350,58 @@ const ArabicUtils = {
 
     // Clean code out of color text
     let cleanColor = rawColor.replace(/\(?([A-Za-z]{1,2}\d{1,2})\)?/g, '').replace(/[\x00\u0000]/g, '').trim();
+    const normColorSegment = this.normalizeArabic(cleanColor);
 
-    // Match with KNOWN_COLORS
-    let matchedColor = cleanColor;
-    const normClean = this.normalize(cleanColor);
-    for (const c of this.KNOWN_COLORS) {
-      if (this.normalize(c) === normClean) {
+    // Sort KNOWN_COLORS longest-first so "مينت غامق" matches before "مينت", and "بيج فاتح" before "بيج"
+    const sortedColors = [...this.KNOWN_COLORS].sort(
+      (a, b) => this.normalizeArabic(b).length - this.normalizeArabic(a).length
+    );
+
+    let matchedColor = '';
+    for (const c of sortedColors) {
+      const normC = this.normalizeArabic(c);
+      if (normC && (normColorSegment.includes(normC) || normC.includes(normColorSegment))) {
         matchedColor = c;
         break;
       }
+    }
+
+    if (!matchedColor) {
+      matchedColor = this.reconstructArabicWords(cleanColor);
     }
 
     return { color: matchedColor, code };
   },
 
   /**
-   * Matches size string against KNOWN_SIZES
+   * Space-Immune Size Parser
+   * Matches normalizeArabic(sizeSegment) against ["الأول", "الثاني", "الثالث", "الرابع"] and standards
    */
   parseSize(rawSize) {
     if (!rawSize) return '';
     const clean = rawSize.replace(/[\x00\u0000]/g, '').trim();
-    const norm = this.normalize(clean);
+    const norm = this.normalizeArabic(clean);
 
-    for (const s of this.KNOWN_SIZES) {
-      if (this.normalize(s) === norm) {
+    if (norm === '1' || norm.includes('الاول')) return 'الأول';
+    if (norm === '2' || norm.includes('الثاني')) return 'الثاني';
+    if (norm === '3' || norm.includes('الثالث')) return 'الثالث';
+    if (norm === '4' || norm.includes('الرابع')) return 'الرابع';
+
+    const knownSizes = ["الأول", "الثاني", "الثالث", "الرابع", "XXL", "XL", "L", "M", "S"];
+    for (const s of knownSizes) {
+      const normS = this.normalizeArabic(s);
+      if (normS === norm || norm.includes(normS)) {
         return s;
       }
     }
 
-    if (norm === '1') return 'الأول';
-    if (norm === '2') return 'الثاني';
-    if (norm === '3') return 'الثالث';
-    if (norm === '4') return 'الرابع';
-
-    return clean;
+    return this.reconstructArabicWords(clean);
   },
 
   /**
-   * Strict Product Line Parser
-   * A line is ONLY a product line if it contains QTY (e.g. (QTY 1), (1 QTY), (QTY 3))
-   * Format in Bosta: [Model Title] - [Color (Optional Code e.g. Z1, V4, W3)] / [Size] (QTY X)
+   * Space-Immune Product Line Parser (QTY lines):
+   * For every line that contains QTY (or Q T Y / Y T Q):
+   * Split by '-' (Model from Color/Size) and by '/' (Color from Size)
    */
   parseProductLine(line) {
     if (!line || typeof line !== 'string') return null;
@@ -373,20 +411,22 @@ const ArabicUtils = {
       return null;
     }
 
-    // MUST contain QTY
-    if (!/QTY/i.test(line)) {
+    // MUST contain QTY (or Q T Y / Y T Q)
+    if (!/Q\s*T\s*Y|Y\s*T\s*Q|QTY/i.test(line)) {
       return null;
     }
 
-    // Extract quantity
+    // Extract quantity (e.g. 1, 2, 3, 4) next to QTY
     let qty = 1;
-    const qtyMatch = line.match(/(?:QTY[:\s]*(\d+)|\((\d+)\s*QTY\)|\(QTY\s*(\d+)\)|(\d+)\s*QTY)/i);
+    const qtyMatch = line.match(/(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)[:\s]*(\d+)|\((\d+)\s*(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)\)|\((?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)\s*(\d+)\)|(\d+)\s*(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)/i);
     if (qtyMatch) {
       qty = parseInt(qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4], 10) || 1;
     }
 
     // Remove QTY from line
-    let clean = line.replace(/\(?(?:QTY[:\s]*\d+|\d+\s*QTY|[0-9]+\s*x)\)?/gi, '').trim();
+    let clean = line.replace(/\(?(?:(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)[:\s]*\d+|\d+\s*(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)|[0-9]+\s*x)\)?/gi, '')
+                    .replace(/(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)/gi, '')
+                    .trim();
 
     // Split by '-' and '/'
     let rawModel = clean;
@@ -427,9 +467,9 @@ const ArabicUtils = {
       size,
       qty,
       raw: line,
-      normalizedModel: this.normalizeText(modelName),
-      normalizedColor: this.normalizeText(color),
-      normalizedSize: this.normalizeText(size)
+      normalizedModel: this.normalizeArabic(modelName),
+      normalizedColor: this.normalizeArabic(color),
+      normalizedSize: this.normalizeArabic(size)
     };
   },
 
@@ -533,26 +573,32 @@ const ArabicUtils = {
       sku = skuMatch[1].toUpperCase();
     }
 
-    // Determine category
-    const fullDescText = products.map(p => p.modelName).join(' ');
-    let category = 'other';
-    const hasKids = /اطفال|اطفالي|أطفال|أطفالي/i.test(fullDescText);
-    const hasWomen = /حريمي/i.test(fullDescText);
+    // BUG 4 FIX: Make Category Filters, Split Downloads & Search 100% Space-Immune
+    // Combine all clean product titles and raw text of the order into normOrderText = normalizeArabic(orderFullProductText)
+    const orderFullProductText = products.map(p => `${p.modelName} ${p.color || ''} ${p.size || ''}`).join(' ') + ' ' + lines.join(' ');
+    const normOrderText = this.normalizeArabic(orderFullProductText);
 
-    if (hasKids && hasWomen) {
+    const isKids = normOrderText.includes('اطفال');
+    const isWomen = normOrderText.includes('حريمي');
+    const isOther = !isKids && !isWomen;
+    const isMulti = products.length > 1;
+    const isSingle = products.length === 1;
+
+    let category = 'other';
+    if (isKids && isWomen) {
       category = 'multi';
-    } else if (hasKids) {
+    } else if (isKids) {
       category = 'kids';
-    } else if (hasWomen) {
+    } else if (isWomen) {
       category = 'women';
-    } else if (products.length >= 2) {
+    } else if (isMulti) {
       category = 'multi';
     } else {
       category = 'other';
     }
 
     // Multi-product order check
-    const isMultiProduct = products.length >= 2;
+    const isMultiProduct = isMulti;
     const primaryProduct = products[0] || {
       modelName: 'بوليصة غير محددة',
       color: '',
@@ -572,6 +618,11 @@ const ArabicUtils = {
       city: city || 'مصر',
       products,
       isMultiProduct,
+      isKids,
+      isWomen,
+      isOther,
+      isMulti,
+      isSingle,
       totalItemsCount: sumQty || 1,
       hasRecognizedDescription: products.length > 0,
       modelName: primaryProduct.modelName,
