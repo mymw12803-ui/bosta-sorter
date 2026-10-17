@@ -25,8 +25,11 @@ const PDFProcessor = {
   async extractPages(arrayBuffer, onProgress) {
     this.initPdfJs();
 
+    // Clone buffer safely before passing to pdf.js to prevent worker detachment
+    const safeBuffer = arrayBuffer.slice(0);
+
     const loadingTask = pdfjsLib.getDocument({
-      data: arrayBuffer,
+      data: safeBuffer,
       cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
       cMapPacked: true
     });
@@ -226,11 +229,19 @@ const PDFProcessor = {
 
   /**
    * Generates final sorted and resized PDF
-   * Uses pdf-lib for vector fidelity and exact thermal dimensions
+   * Uses pdf-lib copyPages for robust vector fidelity and exact thermal dimensions (75mm x 125mm)
    */
   async generateSortedPDF(originalPdfBytes, sortedPages, options = {}, onProgress) {
     if (typeof PDFLib === 'undefined') {
-      throw new Error('مكتبة pdf-lib غير محملة.');
+      throw new Error('مكتبة pdf-lib غير محملة. يرجى التأكد من اتصال الإنترنت.');
+    }
+
+    if (!originalPdfBytes || originalPdfBytes.byteLength === 0) {
+      throw new Error('بيانات ملف الـ PDF الأصلي فارغة أو غير متوفرة.');
+    }
+
+    if (!sortedPages || sortedPages.length === 0) {
+      throw new Error('لا توجد صفحات محددة للتصدير.');
     }
 
     const {
@@ -243,80 +254,71 @@ const PDFProcessor = {
     const targetWidthPt = widthMm * this.MM_TO_PT; // ~212.60 pt
     const targetHeightPt = heightMm * this.MM_TO_PT; // ~354.33 pt
 
-    const sourcePdfDoc = await PDFLib.PDFDocument.load(originalPdfBytes, { ignoreEncryption: true });
-    const newPdfDoc = await PDFLib.PDFDocument.create();
+    try {
+      // Safe clone of original buffer so it is never detached or corrupted
+      const safeBuffer = originalPdfBytes.slice(0);
 
-    const totalPages = sortedPages.length;
+      const sourceDoc = await PDFLib.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
+      const targetDoc = await PDFLib.PDFDocument.create();
 
-    for (let i = 0; i < totalPages; i++) {
-      if (onProgress) {
-        onProgress({
-          current: i + 1,
-          total: totalPages,
-          percent: Math.round(((i + 1) / totalPages) * 100),
-          phase: 'إنشاء صفحات بوليصة الشحن بالحجم الحراري (75×125 ملم)'
-        });
-      }
+      const sortedIndices = sortedPages.map(p => p.originalPageNumber - 1);
+      const copiedPages = await targetDoc.copyPages(sourceDoc, sortedIndices);
 
-      const item = sortedPages[i];
-      const origPageIndex = item.originalPageNumber - 1;
+      const total = copiedPages.length;
 
-      if (resize) {
-        try {
-          // Method: Embed the page into target thermal dimensions
-          const [embeddedPage] = await newPdfDoc.embedPdf(sourcePdfDoc, [origPageIndex]);
-          const newPage = newPdfDoc.addPage([targetWidthPt, targetHeightPt]);
+      for (let i = 0; i < total; i++) {
+        if (onProgress) {
+          onProgress({
+            current: i + 1,
+            total: total,
+            percent: Math.round(((i + 1) / total) * 100),
+            phase: 'تجهيز وتغيير حجم بوالص الشحن للحجم الحراري (75×125 ملم)'
+          });
+        }
 
-          const origWidth = embeddedPage.width;
-          const origHeight = embeddedPage.height;
+        const page = copiedPages[i];
+
+        if (resize) {
+          const { width: origWidth, height: origHeight } = page.getSize();
 
           if (keepAspectRatio) {
-            // Proportional fit with auto-centering (preserves barcode proportions)
+            // Proportional scale to fit inside 75x125 mm
             const scale = Math.min(targetWidthPt / origWidth, targetHeightPt / origHeight);
+            page.scale(scale, scale);
+            page.setSize(targetWidthPt, targetHeightPt);
+
+            // Centering inside the thermal page
             const scaledWidth = origWidth * scale;
             const scaledHeight = origHeight * scale;
-            const x = (targetWidthPt - scaledWidth) / 2;
-            const y = (targetHeightPt - scaledHeight) / 2;
-
-            newPage.drawPage(embeddedPage, {
-              x,
-              y,
-              width: scaledWidth,
-              height: scaledHeight
-            });
+            const xOffset = (targetWidthPt - scaledWidth) / 2;
+            const yOffset = (targetHeightPt - scaledHeight) / 2;
+            page.translateContent(xOffset, yOffset);
           } else {
-            // Stretch to fill exact thermal page dimensions (like PDF24 resize)
-            newPage.drawPage(embeddedPage, {
-              x: 0,
-              y: 0,
-              width: targetWidthPt,
-              height: targetHeightPt
-            });
+            // Direct stretch
+            const scaleX = targetWidthPt / origWidth;
+            const scaleY = targetHeightPt / origHeight;
+            page.scale(scaleX, scaleY);
+            page.setSize(targetWidthPt, targetHeightPt);
           }
-        } catch (embedErr) {
-          console.warn('embedPdf fallback to copyPages for page:', origPageIndex, embedErr);
-          // Fallback: Copy page and scale directly
-          const [copiedPage] = await newPdfDoc.copyPages(sourcePdfDoc, [origPageIndex]);
-          const { width: origW, height: origH } = copiedPage.getSize();
-          
-          if (keepAspectRatio) {
-            const scale = Math.min(targetWidthPt / origW, targetHeightPt / origH);
-            copiedPage.scale(scale, scale);
-          } else {
-            copiedPage.scale(targetWidthPt / origW, targetHeightPt / origH);
-          }
-          newPdfDoc.addPage(copiedPage);
         }
-      } else {
-        // Keep original size without resizing
-        const [copiedPage] = await newPdfDoc.copyPages(sourcePdfDoc, [origPageIndex]);
-        newPdfDoc.addPage(copiedPage);
-      }
-    }
 
-    // Save final PDF
-    const outputPdfBytes = await newPdfDoc.save();
-    return outputPdfBytes;
+        targetDoc.addPage(page);
+      }
+
+      // Save and return final PDF bytes
+      const outputPdfBytes = await targetDoc.save();
+      return outputPdfBytes;
+    } catch (err) {
+      console.error('Error generating PDF:', err);
+      throw new Error(`فشل إنشاء ملف الـ PDF: ${err.message || err}`);
+    }
+  },
+
+  /**
+   * Generates a single-page thermal PDF for quick individual printing
+   */
+  async generateSinglePagePDF(originalPdfBytes, originalPageNumber, options = {}) {
+    return this.generateSortedPDF(originalPdfBytes, [{ originalPageNumber }], options);
   }
 };
 

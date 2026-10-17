@@ -255,7 +255,8 @@ const ArabicUtils = {
     const descriptionLines = [];
     const notesLines = [];
     let trackingNumber = '';
-    let customerName = '';
+    let orderReference = '';
+    let totalPieces = '';
     let city = '';
 
     // Standard Egyptian cities for detection
@@ -273,19 +274,36 @@ const ArabicUtils = {
 
       // Handle visual Arabic reversal while keeping English, numbers, and (1 QTY) intact
       line = this.fixVisualArabic(line);
-
       const normalizedLine = this.normalizeText(line);
 
-      // Check Tracking Number
+      // 1. Extract Total Pieces Count (e.g., [4 قطع], 1 قطعة, 4 Pieces, عطق 4)
+      if (!totalPieces) {
+        const piecesMatch = line.match(/(?:\[|\b)(\d+)\s*(?:قطع|قطعة|قطعه|عطق|ةعطق|Pieces?)(?:\]|\b)/i) ||
+                            line.match(/(?:\[|\b)(?:قطع|قطعة|قطعه|عطق|ةعطق|Pieces?)\s*(\d+)(?:\]|\b)/i);
+        if (piecesMatch) {
+          totalPieces = `${piecesMatch[1]} قطع`;
+        }
+      }
+
+      // 2. Extract Tracking Number (AWB)
       if (!trackingNumber) {
         const trackingMatch = line.match(/(?:Tracking(?:\s*Number)?|رقم الشحنة|رقم التتبع|AWB)[:\s]*([0-9]{7,15})/i) ||
-                             line.match(/\b([0-9]{8,12})\b/);
+                              line.match(/\b([0-9]{8,12})\b/);
         if (trackingMatch) {
           trackingNumber = trackingMatch[1];
         }
       }
 
-      // Check Egyptian City
+      // 3. Extract Order Reference / Barcode Code (e.g. EXC-U5111-353, ORD-1234, REF-99)
+      if (!orderReference) {
+        const refMatch = line.match(/(?:Order\s*Ref(?:erence)?|مرجع الطلب|كود الشحنة|كود الطلب|Ref)[:\s]*([A-Za-z0-9_-]+)/i) ||
+                         line.match(/\b([A-Z]{2,5}-[A-Z0-9]{3,10}-[0-9]{2,6})\b/i);
+        if (refMatch) {
+          orderReference = refMatch[1].trim();
+        }
+      }
+
+      // 4. Extract Egyptian City
       if (!city) {
         for (const c of egyptianCities) {
           if (line.includes(c)) {
@@ -295,13 +313,14 @@ const ArabicUtils = {
         }
       }
 
-      // Check Section Boundaries
+      // 5. Strict Section Boundaries
       const isDescriptionHeader = (
         normalizedLine.includes('وصف الشحنه') ||
         normalizedLine.includes('وصف الطلب') ||
         normalizedLine.includes('محتويات الشحنه') ||
         normalizedLine.includes('وصف الطرد') ||
-        normalizedLine.includes('وصف') && (normalizedLine.includes('شحنه') || normalizedLine.includes('طلب'))
+        (normalizedLine.includes('وصف') && (normalizedLine.includes('شحنه') || normalizedLine.includes('طلب'))) ||
+        /^(?:وصف\s*الشحن[ةه]|Description)$/i.test(normalizedLine)
       );
 
       const isNotesHeader = (
@@ -311,23 +330,26 @@ const ArabicUtils = {
         normalizedLine.includes('notes')
       );
 
-      const isOtherSectionHeader = (
+      const isOtherBoundaryHeader = (
         normalizedLine.includes('بيانات المرسل') ||
         normalizedLine.includes('بيانات المستلم') ||
         normalizedLine.includes('المرسل اليه') ||
         normalizedLine.includes('المبلغ المطلوب') ||
         normalizedLine.includes('cod') ||
         normalizedLine.includes('توقيع المستلم') ||
-        normalizedLine.includes('الباركود')
+        normalizedLine.includes('الباركود') ||
+        normalizedLine.includes('order reference') ||
+        normalizedLine.includes('tracking number') ||
+        normalizedLine.includes('مرجع الطلب')
       );
 
       if (isDescriptionHeader) {
         isInDescription = true;
         isInNotes = false;
-        // Check if description has content on the same line after colon
+        // Check if description line has items directly after colon
         const parts = line.split(/[:：]/);
-        if (parts.length > 1 && parts[1].trim()) {
-          descriptionLines.push(parts[1].trim());
+        if (parts.length > 1 && parts.slice(1).join(':').trim()) {
+          descriptionLines.push(parts.slice(1).join(':').trim());
         }
         continue;
       }
@@ -336,50 +358,51 @@ const ArabicUtils = {
         isInDescription = false;
         isInNotes = true;
         const parts = line.split(/[:：]/);
-        if (parts.length > 1 && parts[1].trim()) {
-          notesLines.push(parts[1].trim());
+        if (parts.length > 1 && parts.slice(1).join(':').trim()) {
+          notesLines.push(parts.slice(1).join(':').trim());
         }
         continue;
       }
 
-      if (isOtherSectionHeader && isInDescription) {
+      if (isOtherBoundaryHeader && isInDescription) {
         isInDescription = false;
       }
 
       if (isInDescription) {
-        // Exclude system words / headers
-        if (!normalizedLine.includes('الكميه') && !normalizedLine.includes('الصنف') && !normalizedLine.includes('سعر')) {
-          descriptionLines.push(line);
-        }
+        // Discard hub codes (e.g. FM-OBOUR, EC-05), phone numbers, prices (e.g. 50 ج.م), and tracking labels
+        if (/^(?:FM-|EC-|CAI-|ALX-|HUB-)[A-Z0-9-]+$/i.test(line)) continue;
+        if (/\b(?:\d+\s*(?:ج\.م|EGP|LE|جنيه))\b/i.test(line)) continue;
+        if (/^(?:\+20|0020|01)[0-9]{8,9}$/.test(line.replace(/[\s-]/g, ''))) continue;
+        if (/Tracking|Order\s*Reference/i.test(line)) continue;
+        if (normalizedLine.includes('الكميه') && normalizedLine.includes('الصنف')) continue;
+
+        descriptionLines.push(line);
       } else if (isInNotes) {
         notesLines.push(line);
       }
     }
 
-    // Fallback: If no explicit "وصف الشحنة" header was captured, search for product-like lines
-    if (descriptionLines.length === 0) {
-      for (const line of lines) {
-        // Line containing hyphen with Arabic and size or qty
-        if ((line.includes('-') || line.includes('/')) &&
-            (line.includes('QTY') || line.includes('qty') || line.includes('x') || /[\u0600-\u06FF]/.test(line))) {
-          // Verify it's not an address or company line
-          const norm = this.normalizeText(line);
-          if (!norm.includes('شارع') && !norm.includes('عماره') && !norm.includes('الدور') && !norm.includes('شقه') && !norm.includes('القاهره')) {
-            descriptionLines.push(line);
-          }
-        }
-      }
-    }
-
-    // Parse product items
+    // Parse product items using strict quantity pattern splitting
     const parsedProducts = [];
     for (const dLine of descriptionLines) {
-      // A single line might contain multiple items separated by comma, semicolon or newline
-      const subLines = dLine.split(/[;,،\n]/).map(s => s.trim()).filter(Boolean);
-      for (const sub of subLines) {
-        const prod = this.parseProductLine(sub);
-        if (prod && prod.modelName) {
-          parsedProducts.push(prod);
+      // Split lines that merge multiple products together using quantity marker e.g. (1 QTY) or (QTY 1)
+      const splitRegex = /(.+?\((?:QTY[:\s]*\d+|\d+\s*QTY|[0-9]+\s*(?:قطع|قطعة)|[0-9]+x)\))/gi;
+      let match;
+      let matchedAny = false;
+      while ((match = splitRegex.exec(dLine)) !== null) {
+        matchedAny = true;
+        const prod = this.parseProductLine(match[1].trim());
+        if (prod && prod.modelName) parsedProducts.push(prod);
+      }
+
+      if (!matchedAny) {
+        // Line without merged pattern
+        const subLines = dLine.split(/[;,،\n]/).map(s => s.trim()).filter(Boolean);
+        for (const sub of subLines) {
+          const prod = this.parseProductLine(sub);
+          if (prod && prod.modelName) {
+            parsedProducts.push(prod);
+          }
         }
       }
     }
@@ -395,7 +418,6 @@ const ArabicUtils = {
         }
       }
     }
-    // Also check all page lines if SKU is still not detected
     if (!detectedSKU) {
       for (const line of lines) {
         const candidate = this.extractSKU(line);
@@ -406,20 +428,17 @@ const ArabicUtils = {
       }
     }
 
-    // Determine if Single-Product Order vs Multi-Product Order
-    // Multi-Product means 2 or more distinct product models or variants
+    // Determine Single vs Multi product order
     let isMultiProduct = false;
     let totalItemsCount = 0;
 
     if (parsedProducts.length === 0) {
-      // Unrecognized description
       isMultiProduct = false;
-      totalItemsCount = 0;
+      totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : 0;
     } else if (parsedProducts.length === 1) {
       isMultiProduct = false;
-      totalItemsCount = parsedProducts[0].qty || 1;
+      totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : (parsedProducts[0].qty || 1);
     } else {
-      // Check if all lines refer to the exact same model & color & size
       const first = parsedProducts[0];
       const allIdentical = parsedProducts.every(p => 
         p.normalizedModel === first.normalizedModel &&
@@ -429,11 +448,16 @@ const ArabicUtils = {
 
       if (allIdentical) {
         isMultiProduct = false;
-        totalItemsCount = parsedProducts.reduce((sum, p) => sum + (p.qty || 1), 0);
+        totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : parsedProducts.reduce((sum, p) => sum + (p.qty || 1), 0);
       } else {
         isMultiProduct = true;
-        totalItemsCount = parsedProducts.reduce((sum, p) => sum + (p.qty || 1), 0);
+        totalItemsCount = totalPieces ? parseInt(totalPieces, 10) : parsedProducts.reduce((sum, p) => sum + (p.qty || 1), 0);
       }
+    }
+
+    // Fallback totalPieces if not extracted from pill
+    if (!totalPieces && totalItemsCount > 0) {
+      totalPieces = `${totalItemsCount} قطع`;
     }
 
     // Primary product for sorting
@@ -442,6 +466,8 @@ const ArabicUtils = {
     const parsedData = {
       originalPageNumber: pageNumber,
       trackingNumber: trackingNumber || `AWB-${pageNumber}`,
+      orderReference: orderReference || trackingNumber || `AWB-${pageNumber}`,
+      totalPieces: totalPieces || `${totalItemsCount} قطع`,
       city: city || 'غير محدد',
       rawDescription: descriptionLines.join(' | ') || (lines.slice(0, 5).join(' ') || 'بدون وصف'),
       rawNotes: combinedNotes || '',

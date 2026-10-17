@@ -8,9 +8,18 @@ body {
   font-family: var(--font-main);
   direction: rtl;
   text-align: right;
-  background-color: #0f172a;
-  color: #f1f5f9;
   min-height: 100vh;
+}
+
+/* Light Theme overrides */
+html:not(.dark) body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html.dark body {
+  background-color: #020617;
+  color: #f8fafc;
 }
 
 /* Custom Scrollbar */
@@ -19,21 +28,41 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: rgba(30, 41, 59, 0.4);
 }
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: #64748b;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: #94a3b8;
 }
 
 /* Drag & Drop Zone Effects */
 .dropzone-active {
-  border-color: #38bdf8 !important;
-  background-color: rgba(56, 189, 248, 0.08) !important;
+  border-color: #14b8a6 !important;
+  background-color: rgba(20, 184, 166, 0.08) !important;
   transform: scale(1.01);
+}
+
+/* SortableJS Drag & Drop Styles */
+.sortable-ghost {
+  opacity: 0.35;
+  background-color: rgba(20, 184, 166, 0.15) !important;
+  border: 2px dashed #14b8a6 !important;
+}
+
+.sortable-chosen {
+  background-color: rgba(20, 184, 166, 0.1) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.drag-handle {
+  cursor: grab;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 /* Pulse animation for processing states */
@@ -45,16 +74,8 @@ body {
   animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Glow effects */
-.glow-primary {
-  box-shadow: 0 0 25px -5px rgba(56, 189, 248, 0.25);
-}
-
-.glow-emerald {
-  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.25);
-}
-
 /* Smooth transitions */
 .transition-smooth {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
