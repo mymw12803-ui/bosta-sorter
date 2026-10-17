@@ -262,8 +262,9 @@ document.addEventListener('DOMContentLoaded', () => {
     state.pdfFileName = file.name;
     const arrayBuffer = await file.arrayBuffer();
     // Keep clean untouched Uint8Array copy as specified
-    state.masterPdfBytes = new Uint8Array(arrayBuffer);
-    state.pdfArrayBuffer = state.masterPdfBytes.slice(0).buffer;
+    window.rawUntouchedPdfBytes = new Uint8Array(arrayBuffer);
+    state.masterPdfBytes = window.rawUntouchedPdfBytes;
+    state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
 
     elements.pdfFileName.textContent = file.name;
     elements.pdfFileSize.textContent = formatFileSize(file.size);
@@ -458,21 +459,22 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.statSinglePercent.textContent = `${singlePercent}% من الشحنات`;
     elements.statMultiPercent.textContent = `${multiPercent}% من الشحنات`;
 
-    // Batch Category Counters (Space-Immune)
+    // Batch Category & Piece Counters
     const countKids = state.sortedPages.filter(p => p.isKids).length;
     const countWomen = state.sortedPages.filter(p => p.isWomen).length;
     const countOther = state.sortedPages.filter(p => p.isOther).length;
-    const countMulti = state.sortedPages.filter(p => p.isMulti).length;
+    const countMultiPieces = state.sortedPages.filter(p => (p.piecesCount || p.totalItemsCount || 1) >= 2).length;
+    const countSinglePieces = state.sortedPages.filter(p => (p.piecesCount || p.totalItemsCount || 1) === 1).length;
 
     if (elements.batchCountKids) elements.batchCountKids.textContent = `${countKids} بوليصة`;
     if (elements.batchCountWomen) elements.batchCountWomen.textContent = `${countWomen} بوليصة`;
     if (elements.batchCountOther) elements.batchCountOther.textContent = `${countOther} بوليصة`;
-    if (elements.batchCountMulti) elements.batchCountMulti.textContent = `${countMulti} بوليصة`;
+    if (elements.batchCountMulti) elements.batchCountMulti.textContent = `${countMultiPieces} بوليصة`;
 
     if (elements.downloadKidsBtn) elements.downloadKidsBtn.disabled = countKids === 0;
     if (elements.downloadWomenBtn) elements.downloadWomenBtn.disabled = countWomen === 0;
     if (elements.downloadOtherBtn) elements.downloadOtherBtn.disabled = countOther === 0;
-    if (elements.downloadMultiBtn) elements.downloadMultiBtn.disabled = countMulti === 0;
+    if (elements.downloadMultiBtn) elements.downloadMultiBtn.disabled = countMultiPieces === 0;
 
     if (elements.totalDownloadCount) elements.totalDownloadCount.textContent = total;
 
@@ -483,8 +485,8 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (f === 'kids') btn.textContent = `🧸 قسم الأطفالي فقط (${countKids})`;
       else if (f === 'women') btn.textContent = `👗 قسم الحريمي فقط (${countWomen})`;
       else if (f === 'other') btn.textContent = `📦 قسم منتجات أخرى (${countOther})`;
-      else if (f === 'single') btn.textContent = `🏷️ طلبات الصنف الواحد (${singleOrders})`;
-      else if (f === 'multi') btn.textContent = `🛍️ طلبات متعددة الأصناف (${multiOrders})`;
+      else if (f === 'multi') btn.textContent = `⚡ أوردرات متعددة القطع (${countMultiPieces})`;
+      else if (f === 'single') btn.textContent = `🏷️ أوردرات قطعة واحدة (${countSinglePieces})`;
     });
   }
 
@@ -556,12 +558,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const query = ArabicUtils.normalizeArabic(state.searchQuery);
 
     const filtered = state.sortedPages.filter(item => {
-      // Category & Tab Filter (Space-Immune flags)
+      // Category & Piece-Count Tab Filter (Space-Immune flags)
+      const count = item.piecesCount || item.totalItemsCount || 1;
       if (state.activeFilter === 'kids' && !item.isKids) return false;
       if (state.activeFilter === 'women' && !item.isWomen) return false;
       if (state.activeFilter === 'other' && !item.isOther) return false;
-      if (state.activeFilter === 'multi' && !item.isMulti) return false;
-      if (state.activeFilter === 'single' && !item.isSingle) return false;
+      if (state.activeFilter === 'multi' && count < 2) return false;
+      if (state.activeFilter === 'single' && count !== 1) return false;
       if (state.activeFilter === 'unknown' && item.hasRecognizedDescription) return false;
 
       // Quick Search Query: 100% Space-Immune comparison across all order data
@@ -601,7 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filtered.length === 0) {
       elements.resultsTableBody.innerHTML = `
         <tr>
-          <td colspan="9" class="px-6 py-12 text-center text-slate-400">
+          <td colspan="8" class="px-6 py-12 text-center text-slate-400">
             <svg class="w-12 h-12 mx-auto mb-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -627,29 +630,43 @@ document.addEventListener('DOMContentLoaded', () => {
       let orderTypeBadge = '';
       if (!item.hasRecognizedDescription) {
         orderTypeBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20">غير محدد</span>';
-      } else if (item.isMultiProduct) {
-        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">متعدد (${item.products.length} أصناف)</span>`;
+      } else if (item.isMultiProduct || (item.piecesCount || item.totalItemsCount || 1) >= 2) {
+        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">متعدد القطع</span>`;
       } else {
-        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/20">صنف واحد</span>`;
+        orderTypeBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/20">قطعة واحدة</span>`;
       }
 
-      // Total Pieces Count
-      const totalPiecesDisplay = item.totalPieces || (item.totalItemsCount ? `${item.totalItemsCount} قطع` : '1 قطعة');
+      // Prominent Color-coded Total Pieces Count Display:
+      // 4+ قطع: Purple/Rose (🔥 X قطع)
+      // 3 قطع: Amber/Orange
+      // 2 قطع: Blue
+      // 1 قطعة: Emerald/Slate
+      const count = item.piecesCount || item.totalItemsCount || 1;
+      let pieceBadgeHtml = '';
+      if (count >= 4) {
+        pieceBadgeHtml = `<span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-black bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 shadow-sm whitespace-nowrap">🔥 ${count} قطع</span>`;
+      } else if (count === 3) {
+        pieceBadgeHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shadow-sm whitespace-nowrap">3 قطع</span>`;
+      } else if (count === 2) {
+        pieceBadgeHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 shadow-sm whitespace-nowrap">2 قطع</span>`;
+      } else {
+        pieceBadgeHtml = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-sm whitespace-nowrap">1 قطعة</span>`;
+      }
 
       // Reference / AWB display
       const refCode = item.orderReference || item.trackingNumber || '-';
 
-      // Clean list of all products in the order, showing Model Name + Color + Size + (QTY X) for each line
+      // Clean list of all products in the order showing reconstructed clean Arabic names with proper spaces
       let productsListHtml = '';
       if (item.products && item.products.length > 0) {
         productsListHtml = item.products.map(p => {
-          const parts = [];
-          parts.push(`<span class="font-bold text-slate-900 dark:text-white">${p.modelName}</span>`);
-          if (p.color) parts.push(`<span class="px-1.5 py-0.2 rounded bg-slate-200/80 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-[11px]">${p.color}${p.colorCode ? ' (' + p.colorCode + ')' : ''}</span>`);
-          if (p.size) parts.push(`<span class="px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-mono font-medium">${p.size}</span>`);
-          parts.push(`<span class="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold font-mono">(QTY ${p.qty || 1})</span>`);
-          if (p.sku) parts.push(`<span class="font-mono text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-300 px-1 py-0.2 rounded border border-sky-500/20 font-semibold">${p.sku}</span>`);
-          return `<div class="flex items-center gap-1.5 flex-wrap py-0.5">${parts.join(' ')}</div>`;
+          const lineStr = p.formattedLineText || `${p.modelName}${p.color ? ' - ' + p.color + (p.colorCode ? ' (' + p.colorCode + ')' : '') : ''}${p.size ? ' / ' + p.size : ''} (${p.qty || 1} QTY)`;
+          return `
+            <div class="flex items-center justify-between gap-2 py-0.5 border-b border-slate-100 dark:border-slate-800/40 last:border-0 flex-wrap">
+              <span class="font-bold text-slate-900 dark:text-white text-xs">${lineStr}</span>
+              ${p.sku ? `<span class="font-mono text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/20 font-semibold whitespace-nowrap">${p.sku}</span>` : ''}
+            </div>
+          `;
         }).join('');
       } else {
         productsListHtml = `<div class="text-xs text-slate-700 dark:text-slate-300 font-medium">${item.modelName || item.rawDescription || '-'}</div>`;
@@ -675,8 +692,8 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </td>
         <td class="px-3 py-3 text-center whitespace-nowrap">
-          <div class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 mb-1">
-            ${totalPiecesDisplay}
+          <div class="mb-1">
+            ${pieceBadgeHtml}
           </div>
           <div>
             ${orderTypeBadge}
@@ -810,19 +827,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let productsListHtml = '';
     if (item.products && item.products.length > 0) {
-      productsListHtml = item.products.map((p, idx) => `
-        <div class="p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/60 mb-2">
-          <div class="flex items-center justify-between mb-1">
-            <span class="font-bold text-slate-800 dark:text-sky-300 text-xs">صنف #${idx + 1}: ${p.modelName}</span>
-            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 font-bold border border-emerald-500/20">الكمية: ${p.qty}</span>
+      productsListHtml = item.products.map((p, idx) => {
+        const lineStr = p.formattedLineText || `${p.modelName}${p.color ? ' - ' + p.color + (p.colorCode ? ' (' + p.colorCode + ')' : '') : ''}${p.size ? ' / ' + p.size : ''} (${p.qty || 1} QTY)`;
+        return `
+          <div class="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/60 mb-2">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="font-bold text-slate-800 dark:text-sky-300 text-xs">صنف #${idx + 1}: ${lineStr}</span>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 font-bold border border-emerald-500/20">الكمية: ${p.qty || 1}</span>
+            </div>
+            <div class="text-xs text-slate-600 dark:text-slate-300 flex flex-wrap gap-3">
+              <span>الموديل: <b class="text-slate-800 dark:text-white">${p.modelName}</b></span>
+              ${p.color ? `<span>اللون: <b class="text-slate-800 dark:text-white">${p.color}${p.colorCode ? ' (' + p.colorCode + ')' : ''}</b></span>` : ''}
+              ${p.size ? `<span>المقاس: <b class="text-slate-800 dark:text-white">${p.size}</b></span>` : ''}
+              ${p.sku ? `<span>كود SKU: <b class="text-teal-600 dark:text-teal-300 font-mono font-bold">${p.sku}</b></span>` : ''}
+            </div>
           </div>
-          <div class="text-xs text-slate-600 dark:text-slate-300 flex flex-wrap gap-3">
-            <span>اللون: <b class="text-slate-800 dark:text-white">${p.color || 'غير محدد'}</b></span>
-            <span>المقاس: <b class="text-slate-800 dark:text-white">${p.size || 'غير محدد'}</b></span>
-            ${p.sku ? `<span>كود SKU: <b class="text-teal-600 dark:text-teal-300 font-mono font-bold">${p.sku}</b></span>` : ''}
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     } else {
       productsListHtml = `<div class="p-3 bg-amber-500/10 text-amber-700 dark:text-amber-300 rounded-xl border border-amber-500/20 text-xs">لم يتم استخراج بنود محددة في هذا الوصف.</div>`;
     }
@@ -879,43 +900,65 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Download single page button in modal
+  // Purple Button: Download single page button in modal
   if (elements.modalDownloadSingleBtn) {
     elements.modalDownloadSingleBtn.addEventListener('click', async () => {
       if (!activeModalItem) return;
-      await exportBatchPDF(
-        [activeModalItem],
-        `Bosta_Single_${activeModalItem.orderReference || activeModalItem.trackingNumber || activeModalItem.originalPageNumber}`
-      );
+      const currentOriginalPageIndex = activeModalItem.originalPageNumber - 1;
+      const orderRef = activeModalItem.orderReference || activeModalItem.trackingNumber || activeModalItem.originalPageNumber;
+      await downloadPdfBatch([currentOriginalPageIndex], `بوليصة_${orderRef}.pdf`);
     });
   }
 
-  // Print single page button in modal
+  // Red Button: Print single page button in modal (Triggers clean iframe/canvas window.print())
   if (elements.modalPrintSingleBtn) {
-    elements.modalPrintSingleBtn.addEventListener('click', async () => {
+    elements.modalPrintSingleBtn.addEventListener('click', () => {
       if (!activeModalItem) return;
       try {
-        const masterBuffer = (state.masterPdfBytes || new Uint8Array(state.pdfArrayBuffer)).slice(0);
-        const singleBytes = await PDFProcessor.generateSinglePagePDF(
-          masterBuffer,
-          activeModalItem.originalPageNumber,
-          {
-            resize: state.resizeEnabled,
-            widthMm: state.widthMm,
-            heightMm: state.heightMm,
-            keepAspectRatio: state.keepAspectRatio
-          }
-        );
-        const blob = new Blob([singleBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const printWin = window.open(url, '_blank');
-        if (printWin) {
-          printWin.focus();
-        } else {
-          await exportBatchPDF([activeModalItem], `Bosta_Single_Print_${activeModalItem.orderReference || activeModalItem.trackingNumber || activeModalItem.originalPageNumber}`);
+        const canvas = elements.modalPdfCanvas;
+        if (!canvas || canvas.classList.contains('hidden')) {
+          showToast('يرجى الانتظار حتى يكتمل عرض البوليصة.', 'error');
+          return;
         }
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        const imgDataUrl = canvas.toDataURL('image/png');
+        const printFrame = document.createElement('iframe');
+        printFrame.style.position = 'fixed';
+        printFrame.style.right = '0';
+        printFrame.style.bottom = '0';
+        printFrame.style.width = '0';
+        printFrame.style.height = '0';
+        printFrame.style.border = '0';
+        document.body.appendChild(printFrame);
+
+        const frameDoc = printFrame.contentWindow.document;
+        frameDoc.open();
+        frameDoc.write(`
+          <!DOCTYPE html>
+          <html dir="rtl">
+            <head>
+              <meta charset="utf-8">
+              <title>طباعة بوليصة ${activeModalItem.orderReference || activeModalItem.originalPageNumber}</title>
+              <style>
+                @page { size: auto; margin: 0; }
+                body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; }
+                img { max-width: 100%; height: auto; display: block; }
+              </style>
+            </head>
+            <body>
+              <img src="${imgDataUrl}" onload="setTimeout(() => { window.focus(); window.print(); }, 200);" />
+            </body>
+          </html>
+        `);
+        frameDoc.close();
+
+        setTimeout(() => {
+          if (printFrame && printFrame.parentNode) {
+            printFrame.parentNode.removeChild(printFrame);
+          }
+        }, 30000);
       } catch (err) {
-        showErrorModal(`خطأ في طباعة الصفحة: ${err.message}`);
+        console.error('Print error:', err);
+        showErrorModal(`خطأ في طباعة الصفحة: ${err.message || err}`);
       }
     });
   }
@@ -931,8 +974,48 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /**
+   * Exact bulletproof download function
+   * Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
+   */
+  async function downloadPdfBatch(pageIndices, filename = 'Bosta_Sorted.pdf') {
+    const bytes = window.rawUntouchedPdfBytes || state.masterPdfBytes;
+    if (!bytes || !pageIndices || pageIndices.length === 0) {
+      alert('لا توجد بوليصات محددة للتحميل');
+      return;
+    }
+    try {
+      const srcDoc = await PDFLib.PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
+      const outDoc = await PDFLib.PDFDocument.create();
+
+      // Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
+      const indices = pageIndices.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
+      const copiedPages = await outDoc.copyPages(srcDoc, indices);
+      for (const page of copiedPages) {
+        outDoc.addPage(page);
+      }
+
+      const pdfBytes = await outDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return pdfBytes;
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('حدث خطأ أثناء تحميل الملف: ' + err.message);
+      throw err;
+    }
+  }
+  window.downloadPdfBatch = downloadPdfBatch;
+
+  /**
    * Universal Batch & Filtered PDF Export Action
-   * Resizes all pages to thermal dimensions (75x125mm) with zero data loss & intact vector barcodes
+   * Pure 1:1 binary copy with zero data loss & intact vector barcodes
    */
   async function exportBatchPDF(pagesToExport, filenamePrefix) {
     if (!pagesToExport || pagesToExport.length === 0) {
@@ -940,7 +1023,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if ((!state.masterPdfBytes || state.masterPdfBytes.byteLength === 0) && (!state.pdfArrayBuffer || state.pdfArrayBuffer.byteLength === 0)) {
+    const bytes = window.rawUntouchedPdfBytes || state.masterPdfBytes;
+    if (!bytes || bytes.byteLength === 0) {
       showErrorModal('بيانات ملف الـ PDF الأصلي غير متوفرة أو تم فقدها في الذاكرة. يرجى إعادة رفع الملف.');
       return;
     }
@@ -953,43 +1037,8 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.progressSection.classList.remove('hidden');
 
     try {
-      // Safe clone of untouched master bytes so worker/pdf-lib operations never detach or neuter it
-      const safeBuffer = (state.masterPdfBytes ? state.masterPdfBytes.slice(0) : new Uint8Array(state.pdfArrayBuffer).slice(0));
-
-      const generatedBytes = await PDFProcessor.generateSortedPDF(
-        safeBuffer,
-        pagesToExport,
-        {
-          resize: state.resizeEnabled,
-          widthMm: state.widthMm,
-          heightMm: state.heightMm,
-          keepAspectRatio: state.keepAspectRatio
-        },
-        (prog) => {
-          elements.progressBar.style.width = `${prog.percent}%`;
-          elements.progressPercent.textContent = `${prog.percent}%`;
-          elements.progressStatus.textContent = `${prog.phase} (${prog.current} من ${prog.total})`;
-        }
-      );
-
-      // Create Blob and trigger download safely via an anchor element
-      const blob = new Blob([generatedBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
       const filename = `${filenamePrefix}_${pagesToExport.length}_Orders.pdf`;
-
-      const downloadLink = document.createElement('a');
-      downloadLink.style.display = 'none';
-      downloadLink.href = url;
-      downloadLink.download = filename;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-
-      setTimeout(() => {
-        if (downloadLink.parentNode) {
-          downloadLink.parentNode.removeChild(downloadLink);
-        }
-        URL.revokeObjectURL(url);
-      }, 5000);
+      await downloadPdfBatch(pagesToExport, filename);
 
       // Confetti celebration if library is available
       if (typeof confetti === 'function') {
@@ -1003,57 +1052,71 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(`تم تنزيل ملف (${filenamePrefix}) بنجاح (${pagesToExport.length} بوليصة)!`, 'success');
     } catch (err) {
       console.error('Critical PDF generation error:', err);
-      showErrorModal(`خطأ تقني أثناء إنشاء وتحميل ملف الـ PDF:\n\n${err.message || err}\n\nيرجى التأكد من سلامة ملف الـ PDF الأصلي وعدم وجود حماية بكلمة سر.`);
+      showErrorModal(`خطأ تقني أثناء إنشاء وتحميل ملف الـ PDF:\n\n${err.message || err}`);
     } finally {
       elements.downloadTopBtn.disabled = false;
       elements.downloadStickyBtn.disabled = false;
       if (elements.downloadFilteredBtn) elements.downloadFilteredBtn.disabled = false;
       if (elements.modalPrintSingleBtn) elements.modalPrintSingleBtn.disabled = false;
+      if (elements.modalDownloadSingleBtn) elements.modalDownloadSingleBtn.disabled = false;
       setTimeout(() => elements.progressSection.classList.add('hidden'), 800);
     }
   }
 
-  // Full Sorted PDF
-  elements.downloadTopBtn.addEventListener('click', () => {
-    exportBatchPDF(state.sortedPages, 'Bosta_All_Sorted_Thermal');
+  // Top Download Bar:
+  // Red Button: "تحميل كافة البوليصات مرتبة (101 بوليصة)" -> Calls downloadPdfBatch(allSortedIndices, 'Bosta_All_Sorted.pdf')
+  elements.downloadTopBtn.addEventListener('click', async () => {
+    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf');
   });
-  elements.downloadStickyBtn.addEventListener('click', () => {
-    exportBatchPDF(state.sortedPages, 'Bosta_All_Sorted_Thermal');
+  elements.downloadStickyBtn.addEventListener('click', async () => {
+    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf');
   });
 
-  // Category Batch Downloads
+  // Dynamic Filter Download Button: "تحميل نتائج الفلتر الحالي (X بوليصة)" -> Downloads only currently filtered rows
+  if (elements.downloadFilteredBtn) {
+    elements.downloadFilteredBtn.addEventListener('click', async () => {
+      if (!state.currentFilteredPages || state.currentFilteredPages.length === 0) {
+        showToast('لا توجد شحنات مطابقة للفلتر الحالي لتصديرها.', 'error');
+        return;
+      }
+      let filename = 'Bosta_Filtered_Results.pdf';
+      if (state.activeFilter === 'kids') filename = 'قسم_الأطفالي.pdf';
+      else if (state.activeFilter === 'women') filename = 'قسم_الحريمي.pdf';
+      else if (state.activeFilter === 'other') filename = 'قسم_منتجات_أخرى.pdf';
+      else if (state.activeFilter === 'all') filename = 'Bosta_All_Sorted.pdf';
+      else if (state.activeFilter === 'multi') filename = 'أوردرات_متعددة_القطع.pdf';
+      else if (state.activeFilter === 'single') filename = 'أوردرات_قطعة_واحدة.pdf';
+
+      await downloadPdfBatch(state.currentFilteredPages, filename);
+    });
+  }
+
+  // Category Batch Downloads (Batch Splitting Cards)
   if (elements.downloadKidsBtn) {
-    elements.downloadKidsBtn.addEventListener('click', () => {
-      const kids = state.sortedPages.filter(p => p.category === 'kids');
-      exportBatchPDF(kids, 'Bosta_Kids_Orders_Only');
+    elements.downloadKidsBtn.addEventListener('click', async () => {
+      const kids = state.sortedPages.filter(p => p.isKids);
+      await downloadPdfBatch(kids, 'قسم_الأطفالي.pdf');
     });
   }
 
   if (elements.downloadWomenBtn) {
-    elements.downloadWomenBtn.addEventListener('click', () => {
-      const women = state.sortedPages.filter(p => p.category === 'women');
-      exportBatchPDF(women, 'Bosta_Women_Orders_Only');
+    elements.downloadWomenBtn.addEventListener('click', async () => {
+      const women = state.sortedPages.filter(p => p.isWomen);
+      await downloadPdfBatch(women, 'قسم_الحريمي.pdf');
     });
   }
 
   if (elements.downloadOtherBtn) {
-    elements.downloadOtherBtn.addEventListener('click', () => {
-      const other = state.sortedPages.filter(p => p.category === 'other');
-      exportBatchPDF(other, 'Bosta_Others_Orders_Only');
+    elements.downloadOtherBtn.addEventListener('click', async () => {
+      const other = state.sortedPages.filter(p => p.isOther);
+      await downloadPdfBatch(other, 'قسم_منتجات_أخرى.pdf');
     });
   }
 
   if (elements.downloadMultiBtn) {
-    elements.downloadMultiBtn.addEventListener('click', () => {
-      const multi = state.sortedPages.filter(p => p.category === 'multi');
-      exportBatchPDF(multi, 'Bosta_Multi_Orders_Only');
-    });
-  }
-
-  // Filtered Search Results Download
-  if (elements.downloadFilteredBtn) {
-    elements.downloadFilteredBtn.addEventListener('click', () => {
-      exportBatchPDF(state.currentFilteredPages, 'Bosta_Filtered_Search_Results');
+    elements.downloadMultiBtn.addEventListener('click', async () => {
+      const multi = state.sortedPages.filter(p => (p.piecesCount || p.totalItemsCount || 1) >= 2);
+      await downloadPdfBatch(multi, 'أوردرات_متعددة_القطع.pdf');
     });
   }
 
@@ -1069,7 +1132,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 1. Generate Sample PDF
       const pdfBytes = await DemoGenerator.createSampleBostaPdfBytes();
-      state.pdfArrayBuffer = pdfBytes.buffer.slice(0);
+      window.rawUntouchedPdfBytes = new Uint8Array(pdfBytes);
+      state.masterPdfBytes = window.rawUntouchedPdfBytes;
+      state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
       state.pdfFile = new File([pdfBytes], 'Sample_Bosta_Labels_Demo.pdf', { type: 'application/pdf' });
 
       elements.pdfFileName.textContent = 'Sample_Bosta_Labels_Demo.pdf';

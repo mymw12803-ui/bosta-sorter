@@ -460,16 +460,62 @@ const ArabicUtils = {
     const { color, code: colorCode } = this.parseColorAndCode(rawColor);
     const size = this.parseSize(rawSize);
 
+    // Reconstruct clean product line text with proper spaces:
+    // e.g. "اسدال بجيوب حريمي - كحلي / الاول (1 QTY)"
+    const formattedParts = [modelName];
+    if (color) formattedParts.push(`- ${color}${colorCode ? ` (${colorCode})` : ''}`);
+    if (size) formattedParts.push(`/ ${size}`);
+    formattedParts.push(`(${qty} QTY)`);
+    const formattedLineText = formattedParts.join(' ');
+
     return {
       modelName,
       color,
       colorCode,
       size,
       qty,
+      formattedLineText,
       raw: line,
       normalizedModel: this.normalizeArabic(modelName),
       normalizedColor: this.normalizeArabic(color),
       normalizedSize: this.normalizeArabic(size)
+    };
+  },
+
+  /**
+   * 100% Reliable Category Detection (Kids vs Women vs Others)
+   * Checks both normalized clean description AND raw visual stream patterns (including reversed glyphs)
+   */
+  detectCategoryFromRawStream(rawText, cleanDescription) {
+    const raw = rawText || '';
+    const clean = cleanDescription || '';
+
+    // Check both normalized clean description AND raw visual stream patterns
+    const combined = (clean + ' ' + raw).replace(/\s+/g, '');
+    const normCombined = this.normalizeArabic(clean + ' ' + raw);
+
+    // Kids patterns: "اطفال", "اطفالي", and visual stream reverse "يلافط", "افط"
+    const isKids = combined.includes('اطفال') ||
+                   combined.includes('اطفالي') ||
+                   combined.includes('يلافط') ||
+                   combined.includes('افط') ||
+                   normCombined.includes('اطفال') ||
+                   normCombined.includes('اطفالي') ||
+                   normCombined.includes('يلافط') ||
+                   normCombined.includes('افط');
+
+    // Women patterns: "حريمي", and visual stream reverse "يميرح", "يمرح"
+    const isWomen = combined.includes('حريمي') ||
+                    combined.includes('يميرح') ||
+                    combined.includes('يمرح') ||
+                    normCombined.includes('حريمي') ||
+                    normCombined.includes('يميرح') ||
+                    normCombined.includes('يمرح');
+
+    return {
+      isKids,
+      isWomen,
+      isOther: !isKids && !isWomen
     };
   },
 
@@ -485,7 +531,6 @@ const ArabicUtils = {
     const products = [];
     let trackingNumber = '';
     let orderReference = '';
-    let totalPieces = '';
     let city = '';
     const notesLines = [];
     let lastProductIndex = -1;
@@ -499,16 +544,18 @@ const ArabicUtils = {
       'أسوان', 'اسوان', 'البحر الأحمر', 'البحر الاحمر', 'الوادي الجديد', 'مطروح'
     ];
 
+    let pillPiecesInt = 0;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
 
-      // 1. Total Pieces extraction from pill line (e.g., [4 قطع], 1 قطعة, قطع 4)
-      if (!totalPieces) {
+      // 1. Total Pieces extraction from pill line (e.g., [4 قطع], 1 قطعة, قطع 4, فتح الشحنة : نعم)
+      if (!pillPiecesInt) {
         const piecesMatch = line.match(/(?:\[|\b)(\d+)\s*(?:قطع|قطعة|قطعه|عطق|Pieces?)(?:\]|\b)/i) ||
                             line.match(/(?:\[|\b)(?:قطع|قطعة|قطعه|عطق|Pieces?)\s*(\d+)(?:\]|\b)/i);
         if (piecesMatch) {
-          totalPieces = `${piecesMatch[1] || piecesMatch[2]} قطع`;
+          pillPiecesInt = parseInt(piecesMatch[1] || piecesMatch[2], 10) || 0;
         }
       }
 
@@ -559,11 +606,10 @@ const ArabicUtils = {
       }
     }
 
-    // If total pieces was not explicitly in the pill line, sum QTY of products
+    // Sum QTY of products and cross-check with pill badge
     const sumQty = products.reduce((acc, p) => acc + (p.qty || 1), 0);
-    if (!totalPieces && sumQty > 0) {
-      totalPieces = `${sumQty} قطع`;
-    }
+    const piecesCount = Math.max(pillPiecesInt, sumQty) || 1;
+    const totalPieces = piecesCount === 1 ? '1 قطعة' : `${piecesCount} قطع`;
 
     // Detect embedded SKU in notes or products
     let sku = '';
@@ -573,16 +619,12 @@ const ArabicUtils = {
       sku = skuMatch[1].toUpperCase();
     }
 
-    // BUG 4 FIX: Make Category Filters, Split Downloads & Search 100% Space-Immune
-    // Combine all clean product titles and raw text of the order into normOrderText = normalizeArabic(orderFullProductText)
-    const orderFullProductText = products.map(p => `${p.modelName} ${p.color || ''} ${p.size || ''}`).join(' ') + ' ' + lines.join(' ');
-    const normOrderText = this.normalizeArabic(orderFullProductText);
-
-    const isKids = normOrderText.includes('اطفال');
-    const isWomen = normOrderText.includes('حريمي');
-    const isOther = !isKids && !isWomen;
-    const isMulti = products.length > 1;
-    const isSingle = products.length === 1;
+    // PERMANENT FIX: 100% Reliable Category Detection (Kids vs Women vs Others)
+    const cleanDescription = products.map(p => `${p.modelName} ${p.color || ''} ${p.size || ''}`).join(' ');
+    const rawText = lines.join(' ') + ' ' + notesLines.join(' ');
+    const { isKids, isWomen, isOther } = this.detectCategoryFromRawStream(rawText, cleanDescription);
+    const isMulti = piecesCount > 1 || products.length > 1;
+    const isSingle = piecesCount === 1;
 
     let category = 'other';
     if (isKids && isWomen) {
@@ -610,11 +652,19 @@ const ArabicUtils = {
       normalizedSize: ''
     };
 
+    // Full description string for Level 2 similarity tie-breaker
+    const sortedProductDescs = [...products]
+      .sort((a, b) => (a.modelName || '').localeCompare(b.modelName || '', 'ar'))
+      .map(p => `${p.modelName} ${p.color || ''} ${p.size || ''}`)
+      .join(' - ');
+    const fullNormalizedDesc = this.normalizeArabic(sortedProductDescs || primaryProduct.modelName);
+
     return {
       originalPageNumber: pageNumber,
       trackingNumber: trackingNumber || (orderReference ? orderReference : `AWB-${pageNumber}`),
       orderReference: orderReference || trackingNumber,
-      totalPieces: totalPieces || (sumQty ? `${sumQty} قطع` : '1 قطعة'),
+      piecesCount,
+      totalPieces,
       city: city || 'مصر',
       products,
       isMultiProduct,
@@ -623,7 +673,8 @@ const ArabicUtils = {
       isOther,
       isMulti,
       isSingle,
-      totalItemsCount: sumQty || 1,
+      totalItemsCount: piecesCount,
+      fullNormalizedDesc,
       hasRecognizedDescription: products.length > 0,
       modelName: primaryProduct.modelName,
       color: primaryProduct.color,

@@ -130,30 +130,37 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy A (Fast Warehouse Picking):
-      // 1. Single-product orders first, Multi-product orders at the end
-      // 2. Alphabetically by Model Name
-      // 3. Alphabetically by Color
-      // 4. By Size rank (الأول -> الثاني -> الثالث -> الرابع)
-      // 5. Quantity
+      // Strategy A (Total Pieces Descending + Model Similarity):
+      // Level 1: Total Pieces Count DESCENDING (8 قطع -> 4 قطع -> 3 قطع -> 2 قطع -> 1 قطعة at the end)
+      // Level 2: Model Name Similarity -> Color -> Size Rank -> Full Normalized Description
       if (strategy === 'A') {
-        if (a.isMultiProduct !== b.isMultiProduct) {
-          return a.isMultiProduct ? 1 : -1;
+        const countA = a.piecesCount || a.totalItemsCount || 1;
+        const countB = b.piecesCount || b.totalItemsCount || 1;
+
+        // Level 1 — Total Pieces Count DESCENDING
+        if (countB !== countA) {
+          return countB - countA;
         }
 
-        const modelCmp = arCollator.compare(a.normalizedModel, b.normalizedModel);
+        // Level 2 — Product Description & Model Name Similarity
+        // 1. Primary Model Title
+        const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
         if (modelCmp !== 0) return modelCmp;
 
-        const colorCmp = arCollator.compare(a.normalizedColor, b.normalizedColor);
+        // 2. Secondary (Color / Variant Code)
+        const colorCmp = arCollator.compare(a.normalizedColor || '', b.normalizedColor || '');
         if (colorCmp !== 0) return colorCmp;
 
+        // 3. Tertiary (Size Rank: الأول -> الثاني -> الثالث -> الرابع)
         const rankA = ArabicUtils.getSizeRank(a.normalizedSize);
         const rankB = ArabicUtils.getSizeRank(b.normalizedSize);
         if (rankA !== rankB) return rankA - rankB;
 
-        if (a.totalItemsCount !== b.totalItemsCount) {
-          return a.totalItemsCount - b.totalItemsCount;
-        }
+        // 4. Full Description Tie-Breaker
+        const descA = a.fullNormalizedDesc || '';
+        const descB = b.fullNormalizedDesc || '';
+        const descCmp = arCollator.compare(descA, descB);
+        if (descCmp !== 0) return descCmp;
 
         return a.originalPageNumber - b.originalPageNumber;
       }
@@ -211,15 +218,18 @@ const PDFProcessor = {
   },
 
   /**
-   * Generates final sorted and resized PDF (75mm x 125mm = 212.60 x 354.33 pt)
-   * Instantaneous zero-loss output when page is already ~212.6 x 354.3 pt
+   * Generates final sorted PDF (Pure 1:1 binary copy)
+   * The Absolute Rule: Use ONLY outDoc.copyPages(srcDoc, pageIndices) and outDoc.addPage(copiedPage).
+   * NEVER touch, resize, scale, or set MediaBox on copied pages!
+   * This completely prevents PDF24's negative matrix (.2399 0 0 -.2399 0 420 cm) from producing a blank page.
    */
   async generateSortedPDF(masterPdfBytes, sortedPages, options = {}, onProgress) {
     if (typeof PDFLib === 'undefined') {
       throw new Error('مكتبة pdf-lib غير محملة. يرجى التأكد من اتصال الإنترنت.');
     }
 
-    if (!masterPdfBytes || masterPdfBytes.byteLength === 0) {
+    const bytes = masterPdfBytes || (typeof window !== 'undefined' ? window.rawUntouchedPdfBytes : null);
+    if (!bytes || bytes.byteLength === 0) {
       throw new Error('بيانات ملف الـ PDF الأصلي غير متوفرة.');
     }
 
@@ -227,60 +237,27 @@ const PDFProcessor = {
       throw new Error('لا توجد صفحات محددة للتصدير.');
     }
 
-    const {
-      resize = true,
-      widthMm = 75,
-      heightMm = 125,
-      keepAspectRatio = true
-    } = options;
-
-    const targetWidthPt = widthMm * this.MM_TO_PT; // ~212.60 pt
-    const targetHeightPt = heightMm * this.MM_TO_PT; // ~354.33 pt
-
     try {
-      const safeBuffer = masterPdfBytes.slice(0);
+      const safeBuffer = bytes.slice(0);
       const srcDoc = await PDFLib.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
       const outDoc = await PDFLib.PDFDocument.create();
 
-      const sortedIndices = sortedPages.map(p => p.originalPageNumber - 1);
+      const sortedIndices = sortedPages.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
+
+      // Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
       const copiedPages = await outDoc.copyPages(srcDoc, sortedIndices);
 
       const total = copiedPages.length;
-
       for (let i = 0; i < total; i++) {
         if (onProgress) {
           onProgress({
             current: i + 1,
             total: total,
             percent: Math.round(((i + 1) / total) * 100),
-            phase: 'تجهيز صفحات الطباعة الحرارية (75×125 ملم)'
+            phase: 'تجهيز صفحات الطباعة (نسخ ثنائي مباشر 1:1)'
           });
         }
-
-        const page = copiedPages[i];
-        const { width: origW, height: origH } = page.getSize();
-
-        // Check if page is already thermal size ~212.6 x 354.3 pt (within ±3 pt)
-        const isAlreadyThermal = Math.abs(origW - targetWidthPt) <= 4 && Math.abs(origH - targetHeightPt) <= 4;
-
-        if (resize && !isAlreadyThermal) {
-          if (keepAspectRatio) {
-            const scale = Math.min(targetWidthPt / origW, targetHeightPt / origH);
-            page.scale(scale, scale);
-            page.setSize(targetWidthPt, targetHeightPt);
-
-            const scaledW = origW * scale;
-            const scaledH = origH * scale;
-            const xOffset = (targetWidthPt - scaledW) / 2;
-            const yOffset = (targetHeightPt - scaledH) / 2;
-            page.translateContent(xOffset, yOffset);
-          } else {
-            page.scale(targetWidthPt / origW, targetHeightPt / origH);
-            page.setSize(targetWidthPt, targetHeightPt);
-          }
-        }
-
-        outDoc.addPage(page);
+        outDoc.addPage(copiedPages[i]);
       }
 
       return await outDoc.save();
