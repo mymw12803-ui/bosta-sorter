@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>فرز بوليصات بوسطة وتجهيز الطباعة الحرارية | Bosta Label Sorter</title>
+  <meta name="description" content="أداة متطورة لفرز وترتيب بوليصات شحن بوسطة Bosta حسب المنتجات والألوان والمقاسات وإعادة تحجيمها للطباعة الحرارية 75×125 ملم بدقة 100% محلياً على المتصفح.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>">
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              400: '#2dd4bf',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e'
+            },
+            bosta: {
+              red: '#e2262a',
+              dark: '#b31518'
+            }
+          },
+          fontFamily: {
+            sans: ['Alexandria', 'Cairo', 'system-ui', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- External Libraries -->
+  <!-- pdf-lib for vector-perfect PDF generation & thermal resizing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <!-- pdf.js for Arabic text extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- SheetJS (xlsx) for inventory export reading -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Confetti for download celebration -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen selection:bg-teal-500 selection:text-white pb-24">
+
+  <!-- Header & Navigation -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 via-orange-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-900/30">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold text-white tracking-wide">منظومة فرز بوليصات بوسطة الذكية</h1>
+            <span class="bg-rose-500/20 text-rose-300 text-xs px-2 py-0.5 rounded-full font-mono font-medium border border-rose-500/30">Bosta AWB Sorter</span>
+          </div>
+          <p class="text-xs text-slate-400">تجهيز وترتيب أوامر التقاط المستودع (Picking) والطباعة الحرارية 75×125 ملم</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2.5">
+        <div class="hidden sm:flex items-center gap-2 bg-slate-800/80 border border-slate-700/80 px-3 py-1.5 rounded-lg text-xs text-slate-300">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>معالجة محلية 100% وآمنة داخل المتصفح</span>
+        </div>
+        <button id="demo-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 px-3.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-sm">
+          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span>تجربة بملف بوليصات تجريبي</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- Hero / Workflow Banner -->
+    <div class="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-xl">
+      <div class="absolute -right-10 -bottom-10 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -left-10 -top-10 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+      <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <span class="text-xs font-semibold uppercase tracking-wider text-teal-400 mb-1 block">نظام أتمتة المستودعات والتجهيز السريع</span>
+          <h2 class="text-xl sm:text-2xl font-bold text-white mb-2">جهّز شحناتك في دقائق بدلاً من ساعات الترتيب اليدوي</h2>
+          <p class="text-sm text-slate-300 max-w-2xl leading-relaxed">
+            يقوم النظام باستخراج النصوص العربية من بوليصات بوسطة بدقة، وتجميع طلبات الموديل الواحد معاً بتسلسل الألوان والمقاسات، مع تحويل المقاس ليتناسب مع الطابعات الحرارية (75×125 ملم) دون المساس بسلامة الباركود والـ QR Code.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+          <div class="bg-slate-950/60 border border-slate-700/50 p-2.5 rounded-xl">
+            <div class="text-teal-400 font-bold text-base mb-0.5">1</div>
+            <div class="text-slate-300">رفع الـ PDF</div>
+          </div>
+          <div class="bg-slate-950/60 border border-slate-700/50 p-2.5 rounded-xl">
+            <div class="text-teal-400 font-bold text-base mb-0.5">2</div>
+            <div class="text-slate-300">الفرز الذكي</div>
+          </div>
+          <div class="bg-slate-950/60 border border-slate-700/50 p-2.5 rounded-xl">
+            <div class="text-teal-400 font-bold text-base mb-0.5">3</div>
+            <div class="text-teal-400 font-bold">75×125 ملم</div>
+            <div class="text-slate-300">مقاس حراري</div>
+          </div>
+          <div class="bg-slate-950/60 border border-slate-700/50 p-2.5 rounded-xl">
+            <div class="text-teal-400 font-bold text-base mb-0.5">4</div>
+            <div class="text-slate-300">طباعة فورية</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 1: Upload Zones -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- Main PDF Dropzone -->
+      <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-rose-500/20 text-rose-400 text-xs font-bold flex items-center justify-center border border-rose-500/30">1</span>
+              <h3 class="font-bold text-white text-base">ملف بوليصات بوسطة (Bosta PDF)</h3>
+              <span class="text-xs bg-rose-500/10 text-rose-400 px-2 py-0.5 rounded border border-rose-500/20 font-medium">مطلوب</span>
+            </div>
+            <span class="text-xs text-slate-400">يدعم ملفات متعددة الصفحات</span>
+          </div>
+
+          <!-- Dropzone Box -->
+          <div id="pdf-dropzone" class="border-2 border-dashed border-slate-700 hover:border-rose-500/70 bg-slate-950/60 rounded-xl p-8 text-center cursor-pointer transition-all duration-200">
+            <input type="file" id="pdf-input" accept=".pdf" class="hidden">
+            
+            <div class="dropzone-prompt">
+              <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </div>
+              <p class="font-semibold text-slate-200 text-sm mb-1">اسحب وأفلت ملف الـ PDF هنا، أو اضغط للاختيار</p>
+              <p class="text-xs text-slate-400">ملف بوليصات الشحن المجمع المصدّر من لوحة تحكم بوسطة (Bosta)</p>
+            </div>
+
+            <div id="pdf-file-info" class="hidden flex items-center justify-between bg-slate-900 border border-slate-700 p-3.5 rounded-lg text-right">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xs">PDF</div>
+                <div>
+                  <div id="pdf-file-name" class="font-semibold text-sm text-white max-w-xs truncate">file.pdf</div>
+                  <div id="pdf-file-size" class="text-xs text-slate-400">0 KB</div>
+                </div>
+              </div>
+              <button id="remove-pdf-btn" class="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition" title="إزالة الملف">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+          <span>يتم الحفاظ على الباركود بدقة Vector كاملة</span>
+          <span>100% طباعة واضحة للأجهزة الحرارية</span>
+        </div>
+      </div>
+
+      <!-- Optional Inventory Dropzone -->
+      <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-teal-500/20 text-teal-400 text-xs font-bold flex items-center justify-center border border-teal-500/30">2</span>
+              <h3 class="font-bold text-white text-base">ملف المخزون (Excel / CSV)</h3>
+              <span class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium">اختياري</span>
+            </div>
+          </div>
+
+          <!-- Dropzone Box -->
+          <div id="inventory-dropzone" class="border-2 border-dashed border-slate-700 hover:border-teal-500/70 bg-slate-950/60 rounded-xl p-8 text-center cursor-pointer transition-all duration-200">
+            <input type="file" id="inventory-input" accept=".csv, .xlsx, .xls" class="hidden">
+            
+            <div class="dropzone-prompt">
+              <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <p class="font-semibold text-slate-200 text-sm mb-1">رفع شيت المخزون (inventory_export)</p>
+              <p class="text-xs text-slate-400">أعمدة: Title, Option1 Value, Option2 Value, SKU</p>
+            </div>
+
+            <div id="inventory-file-info" class="hidden flex items-center justify-between bg-slate-900 border border-slate-700 p-3.5 rounded-lg text-right">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold text-xs">XLSX</div>
+                <div>
+                  <div id="inventory-file-name" class="font-semibold text-sm text-white max-w-xs truncate">inventory.xlsx</div>
+                  <div id="inventory-file-size" class="text-xs text-slate-400">0 KB</div>
+                </div>
+              </div>
+              <button id="remove-inventory-btn" class="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition" title="إزالة الملف">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-400 flex items-center justify-between">
+          <span>يستخدم لربط الموديل بكود الـ SKU وترتيب الأولويات</span>
+          <span class="text-teal-400">Shopify / Salla / Zid</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2 & 3: Configuration (Strategy & Resizing) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- Sorting Strategy Box -->
+      <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 text-xs font-bold flex items-center justify-center border border-amber-500/30">3</span>
+          <h3 class="font-bold text-white text-base">استراتيجية فرز وترتيب البوليصات</h3>
+        </div>
+
+        <div class="space-y-3">
+          <!-- Option A -->
+          <label class="relative flex items-start p-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+            <div class="flex items-center h-5 mt-0.5">
+              <input type="radio" name="sorting-strategy" value="A" checked class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+            </div>
+            <div class="mr-3">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-white text-sm">الخيار (أ): نظام التجهيز السريع للمستودع (موصى به)</span>
+                <span class="text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.2 rounded-full border border-emerald-500/30 font-semibold">موصى به لفرق الشحن</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                تجميع طلبات <b>الموديل الواحد أولاً</b> (مرتبة أبجدياً: اسم الموديل ← اللون ← المقاس)، ثم تجميع طلبات <b>الموديلات المتعددة (2+ منتج مختلف) في نهاية الملف</b> لتجهيزها في محطة التعبئة والتغليف الخاصة.
+              </p>
+            </div>
+          </label>
+
+          <!-- Option B -->
+          <label class="relative flex items-start p-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+            <div class="flex items-center h-5 mt-0.5">
+              <input type="radio" name="sorting-strategy" value="B" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+            </div>
+            <div class="mr-3">
+              <span class="font-bold text-white text-sm">الخيار (ب): ترتيب موحّد حسب المنتج الأول المذكور</span>
+              <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                ترتيب كافة البوليصات معاً استناداً للمنتج الأول المدرج تحت "وصف الشحنة"، ثم حسب اللون والمقاس بدون فصل الطلبات المتعددة.
+              </p>
+            </div>
+          </label>
+
+          <!-- Option C -->
+          <label class="relative flex items-start p-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+            <div class="flex items-center h-5 mt-0.5">
+              <input type="radio" name="sorting-strategy" value="C" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+            </div>
+            <div class="mr-3">
+              <span class="font-bold text-white text-sm">الخيار (ج): ترتيب مخصص حسب كود الـ SKU أو شيت المخزون</span>
+              <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                فرز الشحنات بحسب تسلسل أكواد الـ SKU المكتشفة في ملاحظات البوليصة أو المطابقة مع ملف المخزون المرفوع.
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <!-- Arabic Visual Reverse Processing Toggle -->
+        <div class="mt-4 pt-3.5 border-t border-slate-800/80">
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" id="reverse-arabic-checkbox" checked class="w-4 h-4 mt-0.5 text-teal-500 rounded border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+            <div>
+              <span class="text-xs font-semibold text-slate-200 block">معالجة النصوص العربية المخزنة بصيغة معكوسة (مثل مقط ← طقم، يلافطا ← اطفالي)</span>
+              <span class="text-[11px] text-slate-400 block mt-0.5 leading-relaxed">يعكس ترتيب الحروف داخل الكلمات العربية المستخرجة بصرياً مع الحفاظ على الأرقام الإنجليزية والأقواس والكميات مثل (1 QTY) وأكواد الـ SKU</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Thermal Resizing Box -->
+      <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-400 text-xs font-bold flex items-center justify-center border border-sky-500/30">4</span>
+              <h3 class="font-bold text-white text-base">إعدادات الطباعة الحرارية</h3>
+            </div>
+            <span class="text-xs bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-mono font-medium">75 × 125 mm</span>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Resize Checkbox -->
+            <label class="flex items-center gap-3 p-3 bg-slate-950/70 rounded-xl border border-slate-700/80 cursor-pointer">
+              <input type="checkbox" id="resize-checkbox" checked class="w-4 h-4 text-teal-500 rounded border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+              <span class="text-sm font-semibold text-slate-200">تحويل مقاس الصفحات لأبعاد الطابعة الحرارية (75×125 ملم)</span>
+            </label>
+
+            <!-- Resize sub-options -->
+            <div id="resize-options-container" class="space-y-3 p-4 bg-slate-950/40 rounded-xl border border-slate-800 transition">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-xs font-medium text-slate-300 block">الحفاظ على نسبة العرض للارتفاع (Keep Aspect Ratio)</span>
+                  <span class="text-[11px] text-slate-500">ملاءمة محتوى البوليصة بنسب متناسقة دون تمدد أو تشوه للباركود</span>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="aspect-ratio-toggle" checked class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+                </label>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-slate-400 block mb-1">عرض الصفحة (ملم)</label>
+                  <div class="flex items-center gap-1.5">
+                    <input type="number" id="width-input" value="75" min="40" max="210" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-teal-500 focus:outline-none">
+                    <span class="text-xs text-slate-500">mm</span>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 block mb-1">طول الصفحة (ملم)</label>
+                  <div class="flex items-center gap-1.5">
+                    <input type="number" id="height-input" value="125" min="50" max="350" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-teal-500 focus:outline-none">
+                    <span class="text-xs text-slate-500">mm</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-xs text-slate-400 mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+          <span>75mm = 212.60 pt</span>
+          <span>125mm = 354.33 pt</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Execution Action Buttons -->
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 py-2">
+      <button id="process-btn" disabled class="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-base shadow-lg shadow-teal-900/30 transition transform active:scale-95 flex items-center justify-center gap-2">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>بدء المعالجة والفرز الذكي للبوليصات</span>
+      </button>
+
+      <button id="reset-btn" class="w-full sm:w-auto px-6 py-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-sm transition flex items-center justify-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        <span>إعادة ضبط</span>
+      </button>
+    </div>
+
+    <!-- Progress Indicator -->
+    <div id="progress-section" class="hidden bg-slate-900 border border-teal-500/30 rounded-2xl p-6 shadow-xl space-y-3">
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 border-2 border-teal-400 border-t-transparent rounded-full animate-spin"></div>
+          <span id="progress-status" class="font-semibold text-white">جاري استخراج وتحليل البوليصات...</span>
+        </div>
+        <span id="progress-percent" class="font-mono font-bold text-teal-400 text-base">0%</span>
+      </div>
+      <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
+        <div id="progress-bar" class="bg-gradient-to-r from-teal-500 to-emerald-400 h-3 rounded-full transition-all duration-200" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- Results & Statistics Section -->
+    <div id="results-section" class="hidden space-y-6">
+
+      <!-- Statistics Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <!-- Total Orders -->
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg">
+          <div class="text-xs text-slate-400 mb-1">إجمالي الشحنات / الصفحات</div>
+          <div id="stat-total-orders" class="text-3xl font-extrabold text-white font-mono">0</div>
+          <div class="text-[11px] text-teal-400 mt-1">جاهزة لإعادة الترتيب</div>
+        </div>
+
+        <!-- Single-Model Orders -->
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg">
+          <div class="text-xs text-slate-400 mb-1">طلبات الموديل الواحد (Single)</div>
+          <div id="stat-single-orders" class="text-3xl font-extrabold text-emerald-400 font-mono">0</div>
+          <div id="stat-single-percent" class="text-[11px] text-emerald-300 mt-1">0% من الشحنات</div>
+        </div>
+
+        <!-- Multi-Model Orders -->
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg">
+          <div class="text-xs text-slate-400 mb-1">طلبات متعددة الأصناف (Multi)</div>
+          <div id="stat-multi-orders" class="text-3xl font-extrabold text-purple-400 font-mono">0</div>
+          <div id="stat-multi-percent" class="text-[11px] text-purple-300 mt-1">0% من الشحنات</div>
+        </div>
+
+        <!-- Detected SKUs -->
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg">
+          <div class="text-xs text-slate-400 mb-1">أكواد الـ SKU المكتشفة</div>
+          <div id="stat-detected-skus" class="text-3xl font-extrabold text-sky-400 font-mono">0</div>
+          <div class="text-[11px] text-sky-300 mt-1">من الملاحظات أو الإكسيل</div>
+        </div>
+      </div>
+
+      <!-- Preview Table Container -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+        
+        <!-- Table Header & Controls -->
+        <div class="p-5 border-b border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div>
+            <h3 class="font-bold text-white text-base flex items-center gap-2">
+              <span>جدول معاينة ترتيب البوليصات قبل الطباعة</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                عرض <span id="showing-count" class="font-mono font-bold text-teal-400">0</span> من <span id="total-count" class="font-mono">0</span>
+              </span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">ترتيب الصفحات التالي هو نفس الترتيب الدقيق للملف النهائي الجاهز للطباعة</p>
+          </div>
+
+          <div class="flex items-center gap-3 w-full md:w-auto">
+            <!-- Search Input -->
+            <div class="relative flex-1 md:w-64">
+              <input type="text" id="table-search-input" placeholder="بحث بالموديل، اللون، المقاس، SKU..." class="w-full bg-slate-950 border border-slate-700 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:border-teal-500 focus:outline-none">
+              <svg class="w-4 h-4 text-slate-500 absolute right-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+
+            <!-- Top Download Action -->
+            <button id="download-top-btn" class="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-rose-900/30 whitespace-nowrap">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>تحميل الـ PDF المرتب (75×125 ملم)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="px-5 py-2.5 bg-slate-950/60 border-b border-slate-800/80 flex items-center gap-2 overflow-x-auto text-xs">
+          <span class="text-slate-400 text-xs ml-1">تصفية:</span>
+          <button data-filter="all" class="filter-btn px-3 py-1 rounded-lg bg-teal-500 text-white font-medium transition">كافة الشحنات</button>
+          <button data-filter="single" class="filter-btn px-3 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition">طلبات الموديل المفرد فقط</button>
+          <button data-filter="multi" class="filter-btn px-3 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition">طلبات الأصناف المتعددة فقط</button>
+          <button data-filter="unknown" class="filter-btn px-3 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition">غير محدد / بدون وصف</button>
+        </div>
+
+        <!-- Table View -->
+        <div class="overflow-x-auto max-h-[550px] overflow-y-auto">
+          <table class="w-full text-right border-collapse">
+            <thead class="bg-slate-950 sticky top-0 z-10 text-xs uppercase text-slate-400 border-b border-slate-800">
+              <tr>
+                <th class="px-4 py-3 font-semibold"># الجديد</th>
+                <th class="px-4 py-3 font-semibold"># الأصلي</th>
+                <th class="px-4 py-3 font-semibold">اسم الموديل المستخرج</th>
+                <th class="px-4 py-3 font-semibold">اللون / المقاس</th>
+                <th class="px-4 py-3 font-semibold">نوع الطلب والكمية</th>
+                <th class="px-4 py-3 font-semibold">كود SKU</th>
+                <th class="px-4 py-3 font-semibold text-center">التفاصيل</th>
+              </tr>
+            </thead>
+            <tbody id="results-table-body" class="divide-y divide-slate-800/60">
+              <!-- Dynamically populated via js/app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Sticky Bottom Bar for instant download access -->
+  <div id="download-sticky-bar" class="hidden fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-4 shadow-2xl transition-all">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 px-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold text-sm">
+          ✓
+        </div>
+        <div>
+          <div class="font-bold text-white text-sm">ملف بوسطة جاهز تماماً للطباعة الفورية</div>
+          <div class="text-xs text-slate-400">تم ترتيب الشحنات وضبط أبعاد الصفحات إلى 75×125 ملم مع الحفاظ الكامل على الباركود</div>
+        </div>
+      </div>
+
+      <button id="download-sticky-btn" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-sm shadow-xl shadow-rose-950/40 transition flex items-center justify-center gap-2">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+        </svg>
+        <span>تحميل ملف الـ PDF المرتب والجاهز للطباعة (75×125 ملم)</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detail-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h4 id="modal-title" class="font-bold text-white text-base">تفاصيل البوليصة</h4>
+        <button id="close-modal-btn" class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div id="modal-content" class="space-y-3">
+        <!-- Injected via app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="hidden fixed bottom-6 left-6 z-50 bg-slate-900 border border-teal-500 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 transition-all duration-300 max-w-md">
+    <span class="w-2 h-2 rounded-full bg-teal-400"></span>
+    <span id="toast-message" class="text-xs font-medium"></span>
+  </div>
+
+  <!-- Application Modules -->
+  <script src="js/arabic-utils.js"></script>
+  <script src="js/excel-parser.js"></script>
+  <script src="js/pdf-processor.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
