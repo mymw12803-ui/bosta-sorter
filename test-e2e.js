@@ -73,9 +73,18 @@ async function runE2ETest() {
   const parsedColor = ArabicUtils.parseColorAndCode('اسود (Z1)');
   console.log(`   Color test "اسود (Z1)": Color="${parsedColor.color}", Code="${parsedColor.code}" -> ${parsedColor.color === 'اسود' && parsedColor.code === 'Z1' ? 'PASS' : 'FAIL'}`);
 
-  // Test formattedLineText reconstruction
-  const formattedLineTest = ArabicUtils.parseProductLine('اسدال بجيوب حريمي - كحلي / الاول (QTY 1)');
-  console.log(`   Formatted product line: "${formattedLineTest.formattedLineText}" (Expected: "اسدال بجيوب حريمي - كحلي / الأول (1 QTY)") -> ${formattedLineTest.formattedLineText.includes('اسدال بجيوب حريمي') && formattedLineTest.formattedLineText.includes('كحلي') ? 'PASS' : 'FAIL'}`);
+  // Test Rubik CMap letter mapping (Qaf 017A..017C vs Kaf 017D..017F)
+  const range017A = ArabicUtils.RUBIK_GLYPH_RANGES.find(r => 0x017A >= r.start && 0x017A <= r.end);
+  const range017D = ArabicUtils.RUBIK_GLYPH_RANGES.find(r => 0x017D >= r.start && 0x017D <= r.end);
+  console.log(`   Glyph 017A mapping: <${range017A.unicode}> (Expected: <0642> 'ق') -> ${range017A.unicode === '0642' ? 'PASS' : 'FAIL'}`);
+  console.log(`   Glyph 017D mapping: <${range017D.unicode}> (Expected: <0643> 'ك') -> ${range017D.unicode === '0643' ? 'PASS' : 'FAIL'}`);
+
+  // Test formattedLineText reconstruction with official catalog replacement and proper spaces
+  const sample1 = ArabicUtils.parseProductLine('طقم الاميرات اطفالي - بتنجاني / الرابع (QTY 1)');
+  console.log(`   Example 1 formatted: "${sample1.formattedLineText}" -> ${sample1.formattedLineText === 'طقم الاميرات اطفالي - بتنجاني / الرابع (1 QTY)' ? 'PASS' : 'FAIL'}`);
+
+  const sample2 = ArabicUtils.parseProductLine('سجادة صلاة قطيفة مطبوعة - الأقصى (QTY 3)');
+  console.log(`   Example 2 formatted: "${sample2.formattedLineText}" -> ${sample2.formattedLineText === 'سجادة صلاة قطيفة مطبوعة - الأقصى (3 QTY)' ? 'PASS' : 'FAIL'}`);
 
   // Test 100% Reliable Category Detection (Kids vs Women vs Others)
   console.log('   Testing detectCategoryFromRawStream:');

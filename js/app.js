@@ -57,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Action buttons
     processBtn: document.getElementById('process-btn'),
-    demoBtn: document.getElementById('demo-btn'),
     resetBtn: document.getElementById('reset-btn'),
 
     // Progress
@@ -1121,52 +1120,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   elements.processBtn.addEventListener('click', processLabels);
-
-  /**
-   * Demo Mode Trigger
-   */
-  elements.demoBtn.addEventListener('click', async () => {
-    try {
-      elements.demoBtn.disabled = true;
-      showToast('جاري توليد ملف بوليصات تجريبي لـ بوسطة مع بيانات المخزون...', 'info');
-
-      // 1. Generate Sample PDF
-      const pdfBytes = await DemoGenerator.createSampleBostaPdfBytes();
-      window.rawUntouchedPdfBytes = new Uint8Array(pdfBytes);
-      state.masterPdfBytes = window.rawUntouchedPdfBytes;
-      state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
-      state.pdfFile = new File([pdfBytes], 'Sample_Bosta_Labels_Demo.pdf', { type: 'application/pdf' });
-
-      elements.pdfFileName.textContent = 'Sample_Bosta_Labels_Demo.pdf';
-      elements.pdfFileSize.textContent = formatFileSize(pdfBytes.length);
-      elements.pdfFileInfo.classList.remove('hidden');
-      elements.pdfDropzone.querySelector('.dropzone-prompt').classList.add('hidden');
-
-      // 2. Generate Sample Inventory
-      const excelBytes = DemoGenerator.createSampleInventoryBytes();
-      state.inventoryArrayBuffer = excelBytes;
-      state.inventoryFile = new File([excelBytes], 'warehouse_inventory_export.xlsx', {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      });
-
-      const invRes = await InventoryParser.parseFile(excelBytes);
-      elements.inventoryFileName.textContent = 'warehouse_inventory_export.xlsx';
-      elements.inventoryFileSize.textContent = `${formatFileSize(excelBytes.byteLength)} (${invRes.totalItems} صنف، ${invRes.uniqueSkus} SKU)`;
-      elements.inventoryFileInfo.classList.remove('hidden');
-      elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.add('hidden');
-
-      elements.processBtn.disabled = false;
-      showToast('تم تحميل البيانات التجريبية بنجاح! جاري المعالجة التلقائية...', 'success');
-
-      // Auto trigger processing
-      await processLabels();
-    } catch (err) {
-      console.error(err);
-      showToast(`خطأ في تشغيل الوضع التجريبي: ${err.message}`, 'error');
-    } finally {
-      elements.demoBtn.disabled = false;
-    }
-  });
 
   /**
    * Reset All

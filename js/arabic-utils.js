@@ -64,7 +64,9 @@ const ArabicUtils = {
     { start: 0x016C, end: 0x016E, unicode: '063A' }, // غ
     { start: 0x016F, end: 0x0171, unicode: '0641' }, // ف
     { start: 0x0172, end: 0x0174, unicode: '0642' }, // ق
-    { start: 0x0175, end: 0x017F, unicode: '0643' }, // ك
+    { start: 0x0175, end: 0x0179, unicode: '0643' }, // ك
+    { start: 0x017A, end: 0x017C, unicode: '0642' }, // ق (Fixes: طقم -> طكم, قطيفة -> كطيفة, الأقصى -> ألكصى)
+    { start: 0x017D, end: 0x017F, unicode: '0643' }, // ك (Ensures: كشميري, بكشكشة remain with ك)
     { start: 0x0180, end: 0x0182, unicode: '0644' }, // ل
     { start: 0x0183, end: 0x0185, unicode: '0645' }, // م
     { start: 0x0186, end: 0x0188, unicode: '0646' }, // ن
@@ -215,13 +217,32 @@ const ArabicUtils = {
   },
 
   /**
-   * Collapse spaced single Arabic letters like "ا س د ا ل ب ج ي و ب" -> "اسدال بجيوب"
+   * Restores natural Arabic words with proper spaces, matching against official catalog
    */
   reconstructArabicWords(rawLine) {
     if (!rawLine) return '';
     let line = rawLine.replace(/[\u0000\x00]/g, '').trim();
-    // Collapse consecutive single Arabic letters separated by spaces: "ا س د ا ل" -> "اسدال"
-    return line.replace(/(?<=[\u0600-\u06FF])\s+(?=[\u0600-\u06FF])/g, '');
+
+    // 1. If line contains a catalog title, return official catalog title with exact spaces
+    const norm = this.normalizeArabic(line);
+    const sortedTitles = [...this.WAREHOUSE_TITLES].sort(
+      (a, b) => this.normalizeArabic(b).length - this.normalizeArabic(a).length
+    );
+    for (const title of sortedTitles) {
+      if (norm.includes(this.normalizeArabic(title))) {
+        return title;
+      }
+    }
+
+    // 2. Only collapse spaces if line consists predominantly of spaced single Arabic letters (e.g. "ا س د ا ل")
+    const tokens = line.split(/\s+/).filter(Boolean);
+    const isSingleLetters = tokens.length >= 3 && (tokens.filter(t => t.length === 1 && /[\u0600-\u06FF]/.test(t)).length / tokens.length) > 0.6;
+    if (isSingleLetters) {
+      return line.replace(/(?<=(?:^|\s)[\u0600-\u06FF])\s+(?=[\u0600-\u06FF](?:\s|$))/g, '');
+    }
+
+    // 3. Otherwise preserve natural spaces!
+    return line;
   },
 
   /**
@@ -453,20 +474,41 @@ const ArabicUtils = {
       const parts = clean.split('/');
       rawModel = parts[0].trim();
       rawSize = parts.slice(1).join('/').trim();
+    } else {
+      // If neither '-' nor '/', match against catalog directly
+      const normClean = this.normalizeArabic(clean);
+      const sortedTitles = [...this.WAREHOUSE_TITLES].sort(
+        (a, b) => this.normalizeArabic(b).length - this.normalizeArabic(a).length
+      );
+      for (const title of sortedTitles) {
+        const normT = this.normalizeArabic(title);
+        if (normClean.includes(normT)) {
+          rawModel = title;
+          rawColor = normClean.replace(normT, '');
+          break;
+        }
+      }
     }
 
-    // Reconstruct clean official model, color, and size
+    // Reconstruct clean official model from catalog with proper spaces
     const modelName = this.matchWarehouseModel(rawModel);
     const { color, code: colorCode } = this.parseColorAndCode(rawColor);
     const size = this.parseSize(rawSize);
 
-    // Reconstruct clean product line text with proper spaces:
-    // e.g. "اسدال بجيوب حريمي - كحلي / الاول (1 QTY)"
-    const formattedParts = [modelName];
-    if (color) formattedParts.push(`- ${color}${colorCode ? ` (${colorCode})` : ''}`);
-    if (size) formattedParts.push(`/ ${size}`);
-    formattedParts.push(`(${qty} QTY)`);
-    const formattedLineText = formattedParts.join(' ');
+    // Format the final displayed line cleanly as:
+    // [اسم الموديل المعتمد] - [اللون] / [المقاس] (QTY X)
+    // Examples:
+    // طقم الاميرات اطفالي - بتنجاني / الرابع (1 QTY)
+    // سجادة صلاة قطيفة مطبوعة - الأقصى (3 QTY)
+    let formattedLineText = modelName;
+    if (color && size) {
+      formattedLineText += ` - ${color}${colorCode ? ` (${colorCode})` : ''} / ${size}`;
+    } else if (color) {
+      formattedLineText += ` - ${color}${colorCode ? ` (${colorCode})` : ''}`;
+    } else if (size) {
+      formattedLineText += ` / ${size}`;
+    }
+    formattedLineText += ` (${qty} QTY)`;
 
     return {
       modelName,
