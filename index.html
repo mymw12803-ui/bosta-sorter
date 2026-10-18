@@ -229,51 +229,83 @@
 
       <!-- Sorting Strategy Box -->
       <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
-        <div class="flex items-center gap-2 mb-4">
-          <span class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 text-xs font-bold flex items-center justify-center border border-amber-500/30">3</span>
-          <h3 class="font-bold text-white text-base">استراتيجية فرز وترتيب البوليصات</h3>
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 text-xs font-bold flex items-center justify-center border border-amber-500/30">3</span>
+            <h3 class="font-bold text-white text-base">استراتيجية فرز وترتيب البوليصات</h3>
+          </div>
+          <span class="text-xs bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20 font-medium">4 خيارات فرز ذكية</span>
         </div>
 
         <div class="space-y-3">
-          <!-- Option A -->
-          <label class="relative flex items-start p-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+          <!-- Strategy 1 (Default) -->
+          <label class="relative flex items-start p-3.5 rounded-xl border border-teal-500/40 bg-teal-950/20 hover:bg-slate-800/40 cursor-pointer transition">
             <div class="flex items-center h-5 mt-0.5">
-              <input type="radio" name="sorting-strategy" value="A" checked class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+              <input type="radio" name="sorting-strategy" value="1" checked class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
             </div>
             <div class="mr-3">
               <div class="flex items-center gap-2">
-                <span class="font-bold text-white text-sm">الخيار (أ): ترتيب تنازلي بعدد القطع + تقارب الموديلات (موصى به للمستودع)</span>
-                <span class="text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.2 rounded-full border border-emerald-500/30 font-semibold">المعيار الأساسي</span>
+                <span class="font-bold text-white text-sm">استراتيجية 1: الترتيب العملي لمسار المخزن (الموصى به)</span>
+                <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-semibold">الافتراضي</span>
               </div>
               <p class="text-xs text-slate-400 mt-1 leading-relaxed">
-                فرز الشحنات <b>تنازلياً بحسب إجمالي عدد القطع</b> (الأكبر أولاً: 8 قطع ← 4 قطع ← 3 قطع ← 2 قطع ثم 1 قطعة في النهاية)، وضمن نفس عدد القطع يتم تجميع وترتيب الموديلات المتشابهة بدقة (الموديل ← اللون ← المقاس).
+                1. الأوردرات الكبرى (3+ قطع) تنازلياً ← 2. أوردرات القطعتين (2 قطع) ← 3. أوردرات القطعة الواحدة (حريمي ثم أطفالي ثم منتجات أخرى).
               </p>
             </div>
           </label>
 
-          <!-- Option B -->
-          <label class="relative flex items-start p-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+          <!-- Strategy 2 -->
+          <label class="relative flex items-start p-3.5 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
             <div class="flex items-center h-5 mt-0.5">
-              <input type="radio" name="sorting-strategy" value="B" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+              <input type="radio" name="sorting-strategy" value="2" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
             </div>
             <div class="mr-3">
-              <span class="font-bold text-white text-sm">الخيار (ب): ترتيب موحّد حسب المنتج الأول المذكور</span>
+              <span class="font-bold text-white text-sm">استراتيجية 2: الترتيب حسب شيت ممرات المخزن فقط (Inventory Sequence)</span>
               <p class="text-xs text-slate-400 mt-1 leading-relaxed">
-                ترتيب كافة البوليصات معاً استناداً للمنتج الأول المدرج تحت "وصف الشحنة"، ثم حسب اللون والمقاس بدون فصل الطلبات المتعددة.
+                فرز الشحنات بدقة حسب تسلسل صفوف وأكواد الـ SKU في شيت ممرات المخزن المرفوع لاتباع خط سير الالتقاط دون تشتت.
               </p>
             </div>
           </label>
 
-          <!-- Option C -->
-          <label class="relative flex items-start p-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+          <!-- Strategy 3 -->
+          <label class="relative flex items-start p-3.5 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
             <div class="flex items-center h-5 mt-0.5">
-              <input type="radio" name="sorting-strategy" value="C" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+              <input type="radio" name="sorting-strategy" value="3" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
             </div>
             <div class="mr-3">
-              <span class="font-bold text-white text-sm">الخيار (ج): ترتيب مخصص حسب كود الـ SKU أو شيت المخزون</span>
+              <span class="font-bold text-white text-sm">استراتيجية 3: الترتيب حسب عدد القطع فقط (Piece Count Descending)</span>
               <p class="text-xs text-slate-400 mt-1 leading-relaxed">
-                فرز الشحنات بحسب تسلسل أكواد الـ SKU المكتشفة في ملاحظات البوليصة أو المطابقة مع ملف المخزون المرفوع.
+                ترتيب تنازلي بحت بعدد القطع (الأكبر أولاً: 6+ قطع ← 5 قطع ← 4 قطع ← 3 قطع ← 2 قطع ← 1 قطعة).
               </p>
+            </div>
+          </label>
+
+          <!-- Strategy 4 -->
+          <label class="relative flex items-start p-3.5 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+            <div class="flex items-center h-5 mt-0.5">
+              <input type="radio" name="sorting-strategy" value="4" class="w-4 h-4 text-teal-500 border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+            </div>
+            <div class="mr-3">
+              <span class="font-bold text-white text-sm">استراتيجية 4: الترتيب حسب الأقسام (حريمي ثم أطفالي ثم أخرى)</span>
+              <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                تجميع كافة شحنات قسم الحريمي أولاً، ثم قسم الأطفال، ثم المنتجات الأخرى بشكل مجمع.
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <!-- Blank Separator Toggle & Visual Flow -->
+        <div class="mt-4 pt-3.5 border-t border-slate-800/80 space-y-2">
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" id="blank-separators-checkbox" checked class="w-4 h-4 mt-0.5 text-teal-500 rounded border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
+            <div>
+              <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                <span>📄 وضع صفحة بيضاء فاصلة بين المجموعات (Blank Separators)</span>
+                <span class="bg-teal-500/20 text-teal-300 text-[10px] px-1.5 py-0.2 rounded font-mono">75×125 mm</span>
+              </span>
+              <span class="text-[11px] text-slate-400 block mt-0.5 leading-relaxed">
+                إدراج صفحة بيضاء تلقائياً بعد الأوردرات الكبرى (3+ قطع)، وبعد أوردرات القطعتين، وبين قسم الحريمي وقسم الأطفالي وقسم المنتجات الأخرى لتسهيل فصل رزم الطباعة الحرارية يدوياً.
+              </span>
             </div>
           </label>
         </div>
@@ -498,6 +530,155 @@
               <span>تحميل الأوردرات المتعددة فقط</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Expandable Warehouse Route & Sorting Settings Panel -->
+      <div id="expandable-sorting-panel" class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden transition-all">
+        <!-- Panel Header / Accordion Button -->
+        <button id="toggle-sorting-panel-btn" type="button" class="w-full p-4 sm:px-6 flex items-center justify-between text-right bg-slate-950/70 hover:bg-slate-800/50 border-b border-slate-800/80 transition cursor-pointer">
+          <div class="flex items-center gap-3">
+            <span class="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+            </span>
+            <div>
+              <div class="flex items-center gap-2">
+                <h4 class="font-bold text-white text-sm sm:text-base">خيارات واستراتيجيات الترتيب ومسار المخزن</h4>
+                <span id="panel-active-strategy-badge" class="text-[11px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded font-medium border border-teal-500/30">الترتيب العملي لمسار المخزن</span>
+                <span id="panel-separator-badge" class="hidden sm:inline text-[11px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-medium border border-sky-500/30">صفحات فاصلة بيضاء مفعلة</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">تخصيص استراتيجية الفرز، وتفعيل الفواصل البيضاء، ورفع شيت مسار ممرات المخزن (Walk Sequence)</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400 font-medium hidden sm:inline">خيارات متقدمة</span>
+            <svg id="sorting-panel-chevron" class="w-5 h-5 text-slate-400 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </div>
+        </button>
+
+        <!-- Panel Body Content -->
+        <div id="sorting-panel-content" class="p-5 sm:p-6 space-y-6">
+          
+          <!-- Strategy Radio Selector -->
+          <div>
+            <label class="text-xs font-bold text-slate-200 block mb-2.5">اختيار استراتيجية الترتيب:</label>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <!-- Strategy 1 -->
+              <label class="panel-strategy-label flex items-start p-3 rounded-xl border border-teal-500/40 bg-teal-950/20 hover:bg-slate-800/40 cursor-pointer transition">
+                <input type="radio" name="panel-sorting-strategy" value="1" checked class="w-4 h-4 mt-0.5 text-teal-500 border-slate-700 focus:ring-teal-500">
+                <div class="mr-2.5">
+                  <div class="text-xs font-bold text-white">استراتيجية 1: الترتيب العملي لمسار المخزن (الموصى به)</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                    1. كبرى (3+ قطع) ← 2. قطعتين (2 قطع) ← 3. قطعة واحدة (حريمي ثم أطفالي ثم أخرى).
+                  </div>
+                </div>
+              </label>
+
+              <!-- Strategy 2 -->
+              <label class="panel-strategy-label flex items-start p-3 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+                <input type="radio" name="panel-sorting-strategy" value="2" class="w-4 h-4 mt-0.5 text-teal-500 border-slate-700 focus:ring-teal-500">
+                <div class="mr-2.5">
+                  <div class="text-xs font-bold text-white">استراتيجية 2: حسب شيت ممرات المخزن فقط (Sheet Sequence)</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                    مطابقة الصنف مع ترتيب الصفوف في شيت المخزن المرفوع والفرز الصارم حسب الممرات.
+                  </div>
+                </div>
+              </label>
+
+              <!-- Strategy 3 -->
+              <label class="panel-strategy-label flex items-start p-3 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+                <input type="radio" name="panel-sorting-strategy" value="3" class="w-4 h-4 mt-0.5 text-teal-500 border-slate-700 focus:ring-teal-500">
+                <div class="mr-2.5">
+                  <div class="text-xs font-bold text-white">استراتيجية 3: حسب إجمالي عدد القطع فقط (Piece Count Only)</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                    ترتيب تنازلي مباشر حسب عدد القطع (الأكبر أولاً وصولاً للقطعة الواحدة).
+                  </div>
+                </div>
+              </label>
+
+              <!-- Strategy 4 -->
+              <label class="panel-strategy-label flex items-start p-3 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/40 cursor-pointer transition">
+                <input type="radio" name="panel-sorting-strategy" value="4" class="w-4 h-4 mt-0.5 text-teal-500 border-slate-700 focus:ring-teal-500">
+                <div class="mr-2.5">
+                  <div class="text-xs font-bold text-white">استراتيجية 4: حسب الأقسام (Department Grouping)</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                    تجميع قسم الحريمي أولاً، يليه قسم الأطفالي، ثم قسم المنتجات الأخرى.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Walk Sequence Upload & Blank Separators Grid -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-4 border-t border-slate-800/80">
+            <!-- Blank Separators Checkbox & Flow Diagram -->
+            <div class="bg-slate-950/50 border border-slate-800 p-4 rounded-xl space-y-3">
+              <label class="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" id="blank-separators-panel-checkbox" checked class="w-4 h-4 mt-0.5 text-teal-500 rounded border-slate-700 focus:ring-teal-500">
+                <div>
+                  <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>📄 وضع صفحة بيضاء فاصلة بين المجموعات (Blank Separators)</span>
+                    <span class="text-[10px] bg-teal-500/20 text-teal-300 px-1.5 py-0.2 rounded font-mono">مفعل</span>
+                  </span>
+                  <span class="text-[11px] text-slate-400 block mt-0.5">
+                    إدراج صفحة بيضاء حرارية (75×125 ملم) تلقائياً عند الحدود الفاصلة بين المجموعات لتسهيل تقسيم العمل.
+                  </span>
+                </div>
+              </label>
+
+              <!-- Visual Flow Diagram -->
+              <div class="p-3 bg-slate-900/90 rounded-lg border border-slate-800/70 text-[11px] text-slate-300 font-mono space-y-1">
+                <div class="text-teal-400 font-bold mb-1">تسلسل ملف الطباعة الناتج:</div>
+                <div class="flex flex-wrap items-center gap-1.5 leading-relaxed text-[11px]">
+                  <span class="bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded border border-rose-500/30">1. الكبرى (3+ قطع)</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 فاصل</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">2. قطعتين (2 قطع)</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 فاصل</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded border border-rose-500/30">3. حريمي 1ق</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 فاصل</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">4. أطفالي 1ق</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 فاصل</span>
+                  <span class="text-slate-500">→</span>
+                  <span class="bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded border border-teal-500/30">5. منتجات أخرى</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Warehouse Walk Sequence Sheet Upload -->
+            <div class="bg-slate-950/50 border border-slate-800 p-4 rounded-xl flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <label class="text-xs font-bold text-white flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <span>شيت ترتيب ممرات المخزن (Walk Sequence)</span>
+                  </label>
+                  <span id="walk-sequence-status-badge" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">غير محمل</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mb-3 leading-relaxed">
+                  ارفع شيت الممرات لتحديد مسار عامل الالتقاط (Picker) بحيث يتحرك في دورة واحدة بدون تكرار أو حركة عشوائية بين الممرات.
+                </p>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <input type="file" id="walk-sequence-input" accept=".xlsx, .xls, .csv" class="hidden">
+                <button type="button" id="upload-walk-sequence-btn" class="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-bold rounded-lg border border-teal-500/30 hover:border-teal-500/60 transition flex items-center justify-center gap-1.5 shadow">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  <span>رفع شيت ترتيب ممرات المخزن (Excel / CSV)</span>
+                </button>
+                <button type="button" id="clear-walk-sequence-btn" class="hidden p-2 text-slate-400 hover:text-rose-400 bg-slate-850 hover:bg-slate-800 rounded-lg border border-slate-700 transition" title="إزالة شيت الممرات">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 

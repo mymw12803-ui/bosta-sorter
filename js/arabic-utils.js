@@ -94,6 +94,10 @@ const ArabicUtils = {
       
       // Build replacement bfchar block for Rubik font
       const bfcharList = [];
+      // Space mappings: glyph 0003 and 0020 represent space ' '
+      bfcharList.push('<0003> <0020>');
+      bfcharList.push('<0020> <0020>');
+
       for (const item of this.RUBIK_GLYPH_RANGES) {
         for (let c = item.start; c <= item.end; c++) {
           const hexC = c.toString(16).padStart(4, '0').toUpperCase();
@@ -217,11 +221,43 @@ const ArabicUtils = {
   },
 
   /**
+   * Sanitizes Arabic text extracted from PDF streams to fix known CMap and bidi anomalies
+   */
+  cleanArabicStreamText(text) {
+    if (!text || typeof text !== 'string') return '';
+    let str = text;
+
+    // Replace glyph 0003 / 0020 control codes with regular space
+    str = str.replace(/[\u0003\x03\u0000\x00]/g, ' ');
+
+    // Fix Lam-Alef ligature glitches ("ص ال ه" -> "صلاه", "ا ال ول" -> "الاول", "ا ال مر ات" -> "الاميرات")
+    str = str.replace(/ص\s*ال\s*ه/g, 'صلاه');
+    str = str.replace(/ص\s*لا\s*ه/g, 'صلاه');
+    str = str.replace(/ا\s*ال\s*ول/g, 'الاول');
+    str = str.replace(/ا\s*ال\s*مر\s*ات/g, 'الاميرات');
+    str = str.replace(/ال\s*امر\s*ات/g, 'الاميرات');
+
+    // Fix Haa vs Haa/Dal glitches ("هدريمي" -> "حريمي")
+    str = str.replace(/هدريمي/g, 'حريمي');
+    str = str.replace(/هد\s*ريمي/g, 'حريمي');
+
+    // Fix word boundary mergers
+    str = str.replace(/وتربر\s*وف/g, 'وتر بروف');
+    str = str.replace(/جيبهص\s*ال\s*هليكرا/g, 'جيبه صلاه ليكرا');
+    str = str.replace(/جيبهص\s*الهليكرا/g, 'جيبه صلاه ليكرا');
+    str = str.replace(/جيبه\s*صلاه\s*ليكرا/g, 'جيبه صلاه ليكرا');
+
+    // Collapse multiple internal spaces
+    str = str.replace(/[ \t]+/g, ' ').trim();
+    return str;
+  },
+
+  /**
    * Restores natural Arabic words with proper spaces, matching against official catalog
    */
   reconstructArabicWords(rawLine) {
     if (!rawLine) return '';
-    let line = rawLine.replace(/[\u0000\x00]/g, '').trim();
+    let line = this.cleanArabicStreamText(rawLine);
 
     // 1. If line contains a catalog title, return official catalog title with exact spaces
     const norm = this.normalizeArabic(line);
@@ -444,10 +480,13 @@ const ArabicUtils = {
       qty = parseInt(qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4], 10) || 1;
     }
 
+    // Sanitize text glitches (Lam-Alef, Haa, space codes)
+    let sanitizedLine = this.cleanArabicStreamText(line);
+
     // Remove QTY from line
-    let clean = line.replace(/\(?(?:(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)[:\s]*\d+|\d+\s*(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)|[0-9]+\s*x)\)?/gi, '')
-                    .replace(/(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)/gi, '')
-                    .trim();
+    let clean = sanitizedLine.replace(/\(?(?:(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)[:\s]*\d+|\d+\s*(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)|[0-9]+\s*x)\)?/gi, '')
+                             .replace(/(?:Q\s*T\s*Y|Y\s*T\s*Q|QTY)/gi, '')
+                             .trim();
 
     // Split by '-' and '/'
     let rawModel = clean;

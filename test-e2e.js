@@ -100,6 +100,21 @@ async function runE2ETest() {
   const catMixed = ArabicUtils.detectCategoryFromRawStream('يلافط يمرح', 'طقم اطفال واسدال حريمي');
   console.log(`     Mixed test: isKids=${catMixed.isKids}, isWomen=${catMixed.isWomen}, isOther=${catMixed.isOther} -> ${catMixed.isKids && catMixed.isWomen && !catMixed.isOther ? 'PASS' : 'FAIL'}`);
 
+  // Test CMap & Text Glitches Repair (Lam-Alef, Haa, Word Spacing)
+  console.log('   Testing cleanArabicStreamText & CMap character repairs:');
+  const tSalah = ArabicUtils.cleanArabicStreamText('ص ال ه');
+  console.log(`     "ص ال ه" -> "${tSalah}" (Expected: "صلاه") -> ${tSalah === 'صلاه' ? 'PASS' : 'FAIL'}`);
+  const tAwwal = ArabicUtils.cleanArabicStreamText('ا ال ول');
+  console.log(`     "ا ال ول" -> "${tAwwal}" (Expected: "الاول") -> ${tAwwal === 'الاول' ? 'PASS' : 'FAIL'}`);
+  const tAmeerat = ArabicUtils.cleanArabicStreamText('ا ال مر ات');
+  console.log(`     "ا ال مر ات" -> "${tAmeerat}" (Expected: "الاميرات") -> ${tAmeerat === 'الاميرات' ? 'PASS' : 'FAIL'}`);
+  const tHareemy = ArabicUtils.cleanArabicStreamText('هدريمي');
+  console.log(`     "هدريمي" -> "${tHareemy}" (Expected: "حريمي") -> ${tHareemy === 'حريمي' ? 'PASS' : 'FAIL'}`);
+  const tWaterproof = ArabicUtils.cleanArabicStreamText('وتربر وف');
+  console.log(`     "وتربر وف" -> "${tWaterproof}" (Expected: "وتر بروف") -> ${tWaterproof === 'وتر بروف' ? 'PASS' : 'FAIL'}`);
+  const tSkirt = ArabicUtils.cleanArabicStreamText('جيبهص ال هليكرا');
+  console.log(`     "جيبهص ال هليكرا" -> "${tSkirt}" (Expected: "جيبه صلاه ليكرا") -> ${tSkirt === 'جيبه صلاه ليكرا' ? 'PASS' : 'FAIL'}`);
+
   console.log('1. Generating Demo Bosta PDF...');
   const samplePdfBytes = await DemoGenerator.createSampleBostaPdfBytes();
   console.log('   Demo PDF generated, byte length:', samplePdfBytes.length);
@@ -108,6 +123,21 @@ async function runE2ETest() {
   const sampleExcelBytes = DemoGenerator.createSampleInventoryBytes();
   const invSummary = await InventoryParser.parseFile(sampleExcelBytes);
   console.log('   Inventory parsed:', invSummary);
+
+  // Validate Map 1 (skuOrderMap) and Map 2 (productOrderMap)
+  const isSkuMapPopulated = InventoryParser.skuOrderMap.size > 0;
+  const isProductMapPopulated = InventoryParser.productOrderMap.size > 0;
+  console.log(`   Map 1 (skuOrderMap size=${InventoryParser.skuOrderMap.size}) -> ${isSkuMapPopulated ? 'PASS' : 'FAIL'}`);
+  console.log(`   Map 2 (productOrderMap size=${InventoryParser.productOrderMap.size}) -> ${isProductMapPopulated ? 'PASS' : 'FAIL'}`);
+
+  // Test compositeKey lookup in productOrderMap
+  const testCompositeKey = ArabicUtils.normalizeArabic('طقم الاميرات اطفالي' + ' ' + 'كشميري' + ' ' + 'الثالث');
+  const compositeRowIndex = InventoryParser.productOrderMap.get(testCompositeKey);
+  console.log(`   Composite key "${testCompositeKey}" in productOrderMap: rowIndex=${compositeRowIndex} (Expected: 2) -> ${compositeRowIndex === 2 ? 'PASS' : 'FAIL'}`);
+
+  // Test SKU lookup in skuOrderMap
+  const skuRowIndex = InventoryParser.skuOrderMap.get(ArabicUtils.normalizeText('ba014e2'));
+  console.log(`   SKU "ba014e2" in skuOrderMap: rowIndex=${skuRowIndex} (Expected: 2) -> ${skuRowIndex === 2 ? 'PASS' : 'FAIL'}`);
 
   console.log('3. Simulating Bosta Page Parsing for all sample orders...');
   const parsedPages = DemoGenerator.sampleOrders.map(order => {
@@ -127,6 +157,7 @@ async function runE2ETest() {
       const match = InventoryParser.matchProduct(pageData.primaryProduct);
       if (match && match.sku) pageData.sku = match.sku;
     }
+    pageData.walkIndex = InventoryParser.getWalkIndex(pageData);
     return pageData;
   });
 
@@ -135,80 +166,113 @@ async function runE2ETest() {
   const multiCount = parsedPages.filter(p => p.isMultiProduct).length;
   console.log('   Single-model orders:', singleCount, '| Multi-model orders:', multiCount);
 
-  console.log('4. Sorting orders with Strategy A (Total Pieces Descending + Model Similarity)...');
-  const sorted = PDFProcessor.sortPages(parsedPages, 'A');
-  sorted.forEach(s => {
-    console.log(`   #${s.newPageNumber} (Orig #${s.originalPageNumber}): ${s.totalPieces} | ${s.modelName} | Color: ${s.color} | Size: ${s.size}`);
+  console.log('4. Sorting orders with Strategy 1 (Optimized Warehouse Route)...');
+  const sorted1 = PDFProcessor.sortPages(parsedPages, '1');
+  sorted1.forEach(s => {
+    const rank = PDFProcessor.getStrategy1GroupRank(s);
+    console.log(`   #${s.newPageNumber} (Rank ${rank}, Orig #${s.originalPageNumber}): ${s.totalPieces} | ${s.modelName} | Color: ${s.color} | Size: ${s.size} | WalkIndex: ${s.walkIndex}`);
   });
 
-  // Verify Level 1: Pieces count non-increasing
-  let piecesDescendingPass = true;
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].piecesCount > sorted[i - 1].piecesCount) {
-      piecesDescendingPass = false;
+  // Verify that single-piece Kids orders (Rank 4) are sorted ascending by walkIndex
+  const singleKids = sorted1.filter(s => PDFProcessor.getStrategy1GroupRank(s) === 4);
+  let kidsWalkIndexAscending = true;
+  for (let i = 1; i < singleKids.length; i++) {
+    if (singleKids[i].walkIndex < singleKids[i - 1].walkIndex) {
+      kidsWalkIndexAscending = false;
       break;
     }
   }
-  const isFirstLargest = sorted[0].piecesCount === 3;
-  const isLastSingle = sorted[sorted.length - 1].piecesCount === 1;
-  console.log(`   Level 1 Pieces Descending: ${piecesDescendingPass && isFirstLargest && isLastSingle ? 'PASS (Highest first, 1 قطعة at the end)' : 'FAIL'}`);
+  console.log(`   Single-Piece Kids Walk Sequence (Ascending rowIndex loop route): ${kidsWalkIndexAscending ? 'PASS' : 'FAIL'}`);
+
+  // Verify Strategy 1 rank ordering:
+  // Rank 1 (3+ pieces) -> Rank 2 (2 pieces) -> Rank 3 (1 piece Women) -> Rank 4 (1 piece Kids)
+  let strat1OrderPass = true;
+  for (let i = 1; i < sorted1.length; i++) {
+    const rPrev = PDFProcessor.getStrategy1GroupRank(sorted1[i - 1]);
+    const rCurr = PDFProcessor.getStrategy1GroupRank(sorted1[i]);
+    if (rCurr < rPrev) {
+      strat1OrderPass = false;
+      break;
+    }
+  }
+  console.log(`   Strategy 1 Group Hierarchy: ${strat1OrderPass ? 'PASS (Large -> 2-Piece -> 1-Piece Women -> 1-Piece Kids)' : 'FAIL'}`);
+
+  console.log('4b. Testing Strategy 3 (By Piece Count Only)...');
+  const sorted3 = PDFProcessor.sortPages(parsedPages, '3');
+  let strat3Pass = true;
+  for (let i = 1; i < sorted3.length; i++) {
+    if (sorted3[i].piecesCount > sorted3[i - 1].piecesCount) {
+      strat3Pass = false;
+      break;
+    }
+  }
+  console.log(`   Strategy 3 Piece Count Descending: ${strat3Pass ? 'PASS' : 'FAIL'}`);
+
+  console.log('4c. Testing Strategy 4 (By Department: Women -> Kids -> Others)...');
+  const sorted4 = PDFProcessor.sortPages(parsedPages, '4');
+  let strat4Pass = true;
+  for (let i = 1; i < sorted4.length; i++) {
+    const dA = sorted4[i - 1].isWomen ? 1 : (sorted4[i - 1].isKids ? 2 : 3);
+    const dB = sorted4[i].isWomen ? 1 : (sorted4[i].isKids ? 2 : 3);
+    if (dB < dA) { strat4Pass = false; break; }
+  }
+  console.log(`   Strategy 4 Department Grouping (Women -> Kids -> Others): ${strat4Pass ? 'PASS' : 'FAIL'}`);
 
   // Verify Categories
-  const kidsOrders = sorted.filter(p => p.isKids);
-  const womenOrders = sorted.filter(p => p.isWomen);
-  const otherOrders = sorted.filter(p => p.isOther);
-  const multiOrders = sorted.filter(p => p.piecesCount >= 2);
+  const kidsOrders = sorted1.filter(p => p.isKids);
+  const womenOrders = sorted1.filter(p => p.isWomen);
+  const otherOrders = sorted1.filter(p => p.isOther);
+  const multiOrders = sorted1.filter(p => p.piecesCount >= 2);
   console.log(`   Category Breakdown => Kids: ${kidsOrders.length}, Women: ${womenOrders.length}, Other: ${otherOrders.length}, Multi (2+ pieces): ${multiOrders.length}`);
 
   console.log('5. Testing Category Batch PDF Export: Kids Batch...');
-  const kidsPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, kidsOrders, {
-    resize: true,
-    widthMm: 75,
-    heightMm: 125,
-    keepAspectRatio: true
-  });
+  const kidsPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, kidsOrders);
   const kidsDoc = await PDFLib.PDFDocument.load(kidsPdfBytes);
   console.log(`   Kids Batch PDF: ${kidsDoc.getPageCount()} pages (Expected: ${kidsOrders.length}), Size: ${kidsPdfBytes.length} bytes -> PASS`);
 
   console.log('6. Testing Category Batch PDF Export: Women Batch...');
-  const womenPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, womenOrders, {
-    resize: true,
-    widthMm: 75,
-    heightMm: 125,
-    keepAspectRatio: true
-  });
+  const womenPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, womenOrders);
   const womenDoc = await PDFLib.PDFDocument.load(womenPdfBytes);
   console.log(`   Women Batch PDF: ${womenDoc.getPageCount()} pages (Expected: ${womenOrders.length}), Size: ${womenPdfBytes.length} bytes -> PASS`);
 
   console.log('7. Testing Quick Search / SKU Filter: Filter for "اسود" (Black color)...');
-  const blackOrders = sorted.filter(p => {
+  const blackOrders = sorted1.filter(p => {
     const fullSearchable = ArabicUtils.normalizeArabic(
       (p.modelName || '') + ' ' + (p.color || '') + ' ' + (p.sku || '') + ' ' + (p.orderReference || '')
     );
     return fullSearchable.includes(ArabicUtils.normalizeArabic('ا س و د'));
   });
   console.log(`   Found ${blackOrders.length} orders matching spaced query "ا س و د" (Expected: 2) -> ${blackOrders.length === 2 ? 'PASS' : 'FAIL'}`);
-  const blackPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, blackOrders, {
-    resize: true,
-    widthMm: 75,
-    heightMm: 125,
-    keepAspectRatio: true
-  });
+  const blackPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, blackOrders);
   const blackDoc = await PDFLib.PDFDocument.load(blackPdfBytes);
   console.log(`   Filtered "اسود" PDF: ${blackDoc.getPageCount()} pages, Size: ${blackPdfBytes.length} bytes -> PASS`);
 
-  console.log('8. Generating Full PDF using Pure 1:1 Binary Copy (Preserves exact stream without mutation)...');
-  const finalPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted);
+  console.log('8. Testing Full PDF Export with Blank Separator Pages [212.60, 354.33]...');
+  const pdfWithSeparatorsBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted1, {
+    insertBlankSeparators: true
+  });
+  const docWithSeparators = await PDFLib.PDFDocument.load(pdfWithSeparatorsBytes);
+  const pageCountWithSeparators = docWithSeparators.getPageCount();
+  console.log(`   Page count with separators: ${pageCountWithSeparators} (Original: ${sorted1.length})`);
 
-  console.log('   Final Full Thermal PDF generated successfully!');
-  console.log('   Output file size:', finalPdfBytes.length, 'bytes');
+  // Count how many group transitions exist in sorted1
+  let expectedSeparators = 0;
+  for (let i = 0; i < sorted1.length - 1; i++) {
+    const r1 = PDFProcessor.getStrategy1GroupRank(sorted1[i]);
+    const r2 = PDFProcessor.getStrategy1GroupRank(sorted1[i + 1]);
+    if (r1 >= 1 && r1 <= 4 && r2 > r1 && r2 <= 5) {
+      expectedSeparators++;
+    }
+  }
+  const isSeparatorCountMatch = pageCountWithSeparators === (sorted1.length + expectedSeparators);
+  console.log(`   Expected separators: ${expectedSeparators}, Total pages expected: ${sorted1.length + expectedSeparators} -> ${isSeparatorCountMatch ? 'PASS' : 'FAIL'}`);
 
-  // Verify resulting PDF
+  console.log('9. Generating Full PDF without separators using Pure 1:1 Binary Copy...');
+  const finalPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted1, {
+    insertBlankSeparators: false
+  });
   const finalDoc = await PDFLib.PDFDocument.load(finalPdfBytes);
-  console.log('   Final PDF Page Count:', finalDoc.getPageCount());
-  const firstPage = finalDoc.getPage(0);
-  const size = firstPage.getSize();
-  console.log('   First Page Dimensions (points):', size.width.toFixed(2), 'x', size.height.toFixed(2));
+  console.log('   Final PDF Page Count without separators:', finalDoc.getPageCount(), `(Expected: ${sorted1.length})`);
   console.log('   1:1 Binary Copy Integrity Match: PASS (100% Intact Vector & Content Stream)');
 
   console.log('--- ALL E2E & BATCH SPLITTING TESTS PASSED WITH 100% SUCCESS ---');

@@ -12,7 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     inventoryArrayBuffer: null,
     extractedPages: [],
     sortedPages: [],
-    selectedStrategy: 'A',
+    selectedStrategy: '1',
+    insertBlankSeparators: true,
     resizeEnabled: true,
     keepAspectRatio: true,
     widthMm: 75,
@@ -47,6 +48,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Strategies
     strategyRadios: document.querySelectorAll('input[name="sorting-strategy"]'),
     reverseArabicCheckbox: document.getElementById('reverse-arabic-checkbox'),
+
+    // Expandable sorting panel elements
+    toggleSortingPanelBtn: document.getElementById('toggle-sorting-panel-btn'),
+    sortingPanelContent: document.getElementById('sorting-panel-content'),
+    sortingPanelChevron: document.getElementById('sorting-panel-chevron'),
+    panelActiveStrategyBadge: document.getElementById('panel-active-strategy-badge'),
+    panelSeparatorBadge: document.getElementById('panel-separator-badge'),
+    panelStrategyRadios: document.querySelectorAll('input[name="panel-sorting-strategy"]'),
+
+    // Blank separator checkboxes
+    blankSeparatorsCheckbox: document.getElementById('blank-separators-checkbox'),
+    blankSeparatorsPanelCheckbox: document.getElementById('blank-separators-panel-checkbox'),
+
+    // Walk sequence upload
+    walkSequenceInput: document.getElementById('walk-sequence-input'),
+    uploadWalkSequenceBtn: document.getElementById('upload-walk-sequence-btn'),
+    clearWalkSequenceBtn: document.getElementById('clear-walk-sequence-btn'),
+    walkSequenceStatusBadge: document.getElementById('walk-sequence-status-badge'),
 
     // Resize controls
     resizeCheckbox: document.getElementById('resize-checkbox'),
@@ -297,7 +316,29 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.inventoryFileInfo.classList.remove('hidden');
       elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.add('hidden');
 
-      showToast(`تم تحميل ملف المخزون بنجاح (${res.uniqueSkus} كود SKU).`, 'success');
+      // Update walk sequence badge in settings panel if present
+      if (elements.walkSequenceStatusBadge) {
+        elements.walkSequenceStatusBadge.textContent = `تم تحميل ${res.totalItems} صنف (${res.uniqueSkus} SKU)`;
+        elements.walkSequenceStatusBadge.className = 'text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-medium';
+        if (elements.clearWalkSequenceBtn) elements.clearWalkSequenceBtn.classList.remove('hidden');
+      }
+
+      // If pages are already extracted, update their SKU matching & warehouse walkIndex immediately
+      if (state.extractedPages.length > 0) {
+        state.extractedPages.forEach(p => {
+          if (!p.sku && p.modelName) {
+            const match = InventoryParser.matchProduct(p);
+            if (match && match.sku) {
+              p.sku = match.sku;
+              p.matchedInventory = match;
+            }
+          }
+          p.walkIndex = InventoryParser.getWalkIndex(p);
+        });
+        reSortAndRender();
+      }
+
+      showToast(`تم تحميل ملف المخزون بنجاح (${res.uniqueSkus} كود SKU) وتطبيق خط سير الممرات!`, 'success');
     } catch (err) {
       console.error(err);
       showToast(`خطأ في قراءة ملف المخزون: ${err.message}`, 'error');
@@ -331,15 +372,141 @@ document.addEventListener('DOMContentLoaded', () => {
   setupDropzone(elements.pdfDropzone, elements.pdfInput, handlePdfFile);
   setupDropzone(elements.inventoryDropzone, elements.inventoryInput, handleInventoryFile);
 
-  // Strategy Selector change
+  // Strategy updater function
+  function updateStrategy(newStrategy) {
+    state.selectedStrategy = String(newStrategy);
+
+    // Sync Step 3 radios
+    elements.strategyRadios.forEach(radio => {
+      radio.checked = (radio.value === state.selectedStrategy);
+    });
+
+    // Sync panel radios
+    if (elements.panelStrategyRadios) {
+      elements.panelStrategyRadios.forEach(radio => {
+        radio.checked = (radio.value === state.selectedStrategy);
+      });
+    }
+
+    // Update active badge text
+    if (elements.panelActiveStrategyBadge) {
+      const labels = {
+        '1': 'الترتيب العملي لمسار المخزن',
+        '2': 'حسب شيت ممرات المخزن فقط',
+        '3': 'حسب إجمالي عدد القطع فقط',
+        '4': 'حسب الأقسام حريمي وأطفالي'
+      };
+      elements.panelActiveStrategyBadge.textContent = labels[state.selectedStrategy] || 'الترتيب العملي لمسار المخزن';
+    }
+
+    if (state.extractedPages.length > 0) {
+      reSortAndRender();
+      showToast('تم تحديث استراتيجية الفرز وترتيب البوليصات!', 'info');
+    }
+  }
+
+  // Bind Step 3 strategy radios
   elements.strategyRadios.forEach(radio => {
     radio.addEventListener('change', (e) => {
-      state.selectedStrategy = e.target.value;
+      updateStrategy(e.target.value);
+    });
+  });
+
+  // Bind panel strategy radios
+  if (elements.panelStrategyRadios) {
+    elements.panelStrategyRadios.forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        updateStrategy(e.target.value);
+      });
+    });
+  }
+
+  // Blank Separators toggle updater
+  function updateBlankSeparators(enabled) {
+    state.insertBlankSeparators = Boolean(enabled);
+    if (elements.blankSeparatorsCheckbox) {
+      elements.blankSeparatorsCheckbox.checked = state.insertBlankSeparators;
+    }
+    if (elements.blankSeparatorsPanelCheckbox) {
+      elements.blankSeparatorsPanelCheckbox.checked = state.insertBlankSeparators;
+    }
+    if (elements.panelSeparatorBadge) {
+      elements.panelSeparatorBadge.textContent = state.insertBlankSeparators
+        ? 'صفحات فاصلة بيضاء مفعلة'
+        : 'صفحات فاصلة معطلة';
+      elements.panelSeparatorBadge.className = state.insertBlankSeparators
+        ? 'hidden sm:inline text-[11px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-medium border border-sky-500/30'
+        : 'hidden sm:inline text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-medium border border-slate-700';
+    }
+    showToast(state.insertBlankSeparators ? 'تم تفعيل الفواصل البيضاء بين المجموعات.' : 'تم تعطيل الفواصل البيضاء.', 'info');
+  }
+
+  if (elements.blankSeparatorsCheckbox) {
+    elements.blankSeparatorsCheckbox.addEventListener('change', (e) => {
+      updateBlankSeparators(e.target.checked);
+    });
+  }
+  if (elements.blankSeparatorsPanelCheckbox) {
+    elements.blankSeparatorsPanelCheckbox.addEventListener('change', (e) => {
+      updateBlankSeparators(e.target.checked);
+    });
+  }
+
+  // Expandable panel accordion toggle
+  if (elements.toggleSortingPanelBtn && elements.sortingPanelContent) {
+    elements.toggleSortingPanelBtn.addEventListener('click', () => {
+      const isHidden = elements.sortingPanelContent.classList.contains('hidden');
+      elements.sortingPanelContent.classList.toggle('hidden', !isHidden);
+      if (elements.sortingPanelChevron) {
+        elements.sortingPanelChevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+      }
+    });
+  }
+
+  // Walk sequence upload handlers
+  if (elements.uploadWalkSequenceBtn && elements.walkSequenceInput) {
+    elements.uploadWalkSequenceBtn.addEventListener('click', () => {
+      elements.walkSequenceInput.click();
+    });
+
+    elements.walkSequenceInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      await handleInventoryFile(file);
+      // Update walk sequence badge
+      if (elements.walkSequenceStatusBadge && InventoryParser.inventoryItems.length > 0) {
+        elements.walkSequenceStatusBadge.textContent = `تم تحميل ${InventoryParser.inventoryItems.length} صنف`;
+        elements.walkSequenceStatusBadge.className = 'text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-medium';
+        if (elements.clearWalkSequenceBtn) elements.clearWalkSequenceBtn.classList.remove('hidden');
+      }
+      // Update walkIndex for all extracted pages
       if (state.extractedPages.length > 0) {
+        state.extractedPages.forEach(p => {
+          p.walkIndex = InventoryParser.getWalkIndex(p);
+        });
         reSortAndRender();
       }
     });
-  });
+  }
+
+  if (elements.clearWalkSequenceBtn) {
+    elements.clearWalkSequenceBtn.addEventListener('click', () => {
+      InventoryParser.reset();
+      if (elements.walkSequenceInput) elements.walkSequenceInput.value = '';
+      if (elements.walkSequenceStatusBadge) {
+        elements.walkSequenceStatusBadge.textContent = 'غير محمل';
+        elements.walkSequenceStatusBadge.className = 'text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700';
+      }
+      elements.clearWalkSequenceBtn.classList.add('hidden');
+      if (state.extractedPages.length > 0) {
+        state.extractedPages.forEach(p => {
+          p.walkIndex = 999999;
+        });
+        reSortAndRender();
+      }
+      showToast('تمت إزالة شيت مسار ممرات المخزن.', 'info');
+    });
+  }
 
   // Visual Arabic Reversal Toggle change
   if (elements.reverseArabicCheckbox) {
@@ -975,8 +1142,9 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * Exact bulletproof download function
    * Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
+   * Supports blank separator pages insertion [212.60, 354.33] when options.insertBlankSeparators is true.
    */
-  async function downloadPdfBatch(pageIndices, filename = 'Bosta_Sorted.pdf') {
+  async function downloadPdfBatch(pageIndices, filename = 'Bosta_Sorted.pdf', options = {}) {
     const bytes = window.rawUntouchedPdfBytes || state.masterPdfBytes;
     if (!bytes || !pageIndices || pageIndices.length === 0) {
       alert('لا توجد بوليصات محددة للتحميل');
@@ -989,8 +1157,25 @@ document.addEventListener('DOMContentLoaded', () => {
       // Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
       const indices = pageIndices.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
       const copiedPages = await outDoc.copyPages(srcDoc, indices);
-      for (const page of copiedPages) {
-        outDoc.addPage(page);
+
+      const total = copiedPages.length;
+      for (let i = 0; i < total; i++) {
+        outDoc.addPage(copiedPages[i]);
+
+        // Blank Separator Logic (صفحة بيضاء فاصلة بين المجموعات)
+        if (options.insertBlankSeparators && i < total - 1) {
+          const curPage = pageIndices[i];
+          const nextPage = pageIndices[i + 1];
+          if (curPage && nextPage && typeof PDFProcessor !== 'undefined') {
+            const rankCur = PDFProcessor.getStrategy1GroupRank(curPage);
+            const rankNext = PDFProcessor.getStrategy1GroupRank(nextPage);
+
+            // Boundary transitions: 1->2, 2->3, 3->4, 4->5
+            if (rankCur >= 1 && rankCur <= 4 && rankNext > rankCur && rankNext <= 5) {
+              outDoc.addPage([212.60, 354.33]);
+            }
+          }
+        }
       }
 
       const pdfBytes = await outDoc.save();
@@ -1016,7 +1201,7 @@ document.addEventListener('DOMContentLoaded', () => {
    * Universal Batch & Filtered PDF Export Action
    * Pure 1:1 binary copy with zero data loss & intact vector barcodes
    */
-  async function exportBatchPDF(pagesToExport, filenamePrefix) {
+  async function exportBatchPDF(pagesToExport, filenamePrefix, options = {}) {
     if (!pagesToExport || pagesToExport.length === 0) {
       showToast('لا توجد شحنات محددة لتصديرها كملف PDF.', 'error');
       return;
@@ -1037,7 +1222,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const filename = `${filenamePrefix}_${pagesToExport.length}_Orders.pdf`;
-      await downloadPdfBatch(pagesToExport, filename);
+      await downloadPdfBatch(pagesToExport, filename, options);
 
       // Confetti celebration if library is available
       if (typeof confetti === 'function') {
@@ -1063,12 +1248,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Top Download Bar:
-  // Red Button: "تحميل كافة البوليصات مرتبة (101 بوليصة)" -> Calls downloadPdfBatch(allSortedIndices, 'Bosta_All_Sorted.pdf')
+  // Red Button: "تحميل كافة البوليصات مرتبة (101 بوليصة)" -> Calls downloadPdfBatch with separator options
   elements.downloadTopBtn.addEventListener('click', async () => {
-    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf');
+    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf', { insertBlankSeparators: state.insertBlankSeparators });
   });
   elements.downloadStickyBtn.addEventListener('click', async () => {
-    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf');
+    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf', { insertBlankSeparators: state.insertBlankSeparators });
   });
 
   // Dynamic Filter Download Button: "تحميل نتائج الفلتر الحالي (X بوليصة)" -> Downloads only currently filtered rows
