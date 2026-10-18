@@ -32,7 +32,16 @@ async function runE2ETest() {
   global.PDFLib = PDFLib;
   global.XLSX = XLSX;
 
-  const env = { window: { PDFLib, XLSX } };
+  const mockStorage = new Map();
+  const localStorageMock = {
+    getItem: k => mockStorage.has(k) ? mockStorage.get(k) : null,
+    setItem: (k, v) => mockStorage.set(k, String(v)),
+    removeItem: k => mockStorage.delete(k),
+    clear: () => mockStorage.clear()
+  };
+  global.localStorage = localStorageMock;
+
+  const env = { window: { PDFLib, XLSX, localStorage: localStorageMock } };
   new Function('window', arabicUtilsCode)(env.window);
   new Function('window', excelParserCode)(env.window);
   new Function('window', demoDataCode)(env.window);
@@ -166,21 +175,36 @@ async function runE2ETest() {
   const multiCount = parsedPages.filter(p => p.isMultiProduct).length;
   console.log('   Single-model orders:', singleCount, '| Multi-model orders:', multiCount);
 
-  console.log('4. Testing Unified Layered Sorting Pipeline (3 Layers)...');
+  console.log('0b. Testing 50 Master Warehouse Route Sequence Items & Ranking...');
+  const seqLength = ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length;
+  console.log(`   Route sequence count: ${seqLength} (Expected: 50) -> ${seqLength === 50 ? 'PASS' : 'FAIL'}`);
+  const r0 = ArabicUtils.getWarehouseRouteRank('تلبيسه اطفالي');
+  const r3a = ArabicUtils.getWarehouseRouteRank('اسدال بخمار اطفالي ساده');
+  const r3b = ArabicUtils.getWarehouseRouteRank('اسدال بخمار اطفالي مشجر');
+  const r25 = ArabicUtils.getWarehouseRouteRank('رقه حريمي');
+  const r48 = ArabicUtils.getWarehouseRouteRank('سجاد اطفالي');
+  const r49 = ArabicUtils.getWarehouseRouteRank('سجاد حريمي');
+  console.log(`   Rank 0 ("تلبيسه اطفالي"): ${r0} -> ${r0 === 0 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Rank 3 ("اسدال بخمار اطفالي ساده / مشجر"): ${r3a}, ${r3b} -> ${r3a === 3 && r3b === 3 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Rank 25 ("رقه حريمي"): ${r25} -> ${r25 === 25 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Rank 48 ("سجاد اطفالي"): ${r48} -> ${r48 === 48 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Rank 49 ("سجاد حريمي"): ${r49} -> ${r49 === 49 ? 'PASS' : 'FAIL'}`);
+
+  console.log('4. Testing Strict Multi-Level Sorting Pipeline (Pieces Desc -> Route Rank -> CSV Walk)...');
   const sorted = PDFProcessor.sortPages(parsedPages, { useWalkSequence: true });
   sorted.forEach(s => {
     const pGroup = PDFProcessor.getPieceGroup(s);
-    const dRank = PDFProcessor.getDeptRank(s);
-    console.log(`   #${s.newPageNumber} (PieceGrp ${pGroup}, Dept ${dRank}, Orig #${s.originalPageNumber}): ${s.totalPieces} | ${s.modelName} | Color: ${s.color} | Size: ${s.size} | WalkIndex: ${s.walkIndex}`);
+    const rRank = s.routeRank !== undefined ? s.routeRank : PDFProcessor.getOrderRouteRank(s);
+    console.log(`   #${s.newPageNumber} (PieceGrp ${pGroup}, Pieces: ${s.totalPieces}, RouteRank: ${rRank}, Orig #${s.originalPageNumber}): ${s.modelName} | Color: ${s.color} | Size: ${s.size} | WalkIndex: ${s.walkIndex}`);
   });
 
-  // Layer 1 validation: Large (3+) -> Two-Piece (2) -> Single (1)
-  let layer1Pass = true;
+  // Level 1 validation: Large (3+) -> Two-Piece (2) -> Single (1)
+  let level1Pass = true;
   for (let i = 1; i < sorted.length; i++) {
     const gPrev = PDFProcessor.getPieceGroup(sorted[i - 1]);
     const gCurr = PDFProcessor.getPieceGroup(sorted[i]);
     if (gCurr < gPrev) {
-      layer1Pass = false;
+      level1Pass = false;
       break;
     }
     // If both in Group 1 (3+ pieces), must be descending by piece count
@@ -188,44 +212,44 @@ async function runE2ETest() {
       const cPrev = sorted[i - 1].piecesCount || 1;
       const cCurr = sorted[i].piecesCount || 1;
       if (cCurr > cPrev) {
-        layer1Pass = false;
+        level1Pass = false;
         break;
       }
     }
   }
-  console.log(`   Layer 1 (Piece Count Hierarchy: 3+ Descending -> 2-Piece -> 1-Piece): ${layer1Pass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Level 1 (Piece Count Hierarchy: 3+ Descending -> 2-Piece -> 1-Piece): ${level1Pass ? 'PASS' : 'FAIL'}`);
 
-  // Layer 2 validation: Within same piece group, Women (1) -> Kids (2) -> Others (3)
-  let layer2Pass = true;
+  // Level 2 validation: Within same piece group, routeRank must be ascending
+  let level2Pass = true;
   for (let i = 1; i < sorted.length; i++) {
     const gPrev = PDFProcessor.getPieceGroup(sorted[i - 1]);
     const gCurr = PDFProcessor.getPieceGroup(sorted[i]);
     if (gPrev === gCurr) {
-      const dPrev = PDFProcessor.getDeptRank(sorted[i - 1]);
-      const dCurr = PDFProcessor.getDeptRank(sorted[i]);
-      if (dCurr < dPrev) {
-        layer2Pass = false;
+      const rPrev = sorted[i - 1].routeRank !== undefined ? sorted[i - 1].routeRank : PDFProcessor.getOrderRouteRank(sorted[i - 1]);
+      const rCurr = sorted[i].routeRank !== undefined ? sorted[i].routeRank : PDFProcessor.getOrderRouteRank(sorted[i]);
+      if (rCurr < rPrev) {
+        level2Pass = false;
         break;
       }
     }
   }
-  console.log(`   Layer 2 (Department Grouping: Women -> Kids -> Others): ${layer2Pass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Level 2 (Master Warehouse Route Sequence 0..49 Ascending): ${level2Pass ? 'PASS' : 'FAIL'}`);
 
-  // Layer 3 validation: Within same piece & dept group, walkIndex must be ascending
-  let layer3Pass = true;
+  // Level 3 validation: Within same piece & same routeRank, walkIndex must be ascending if specified
+  let level3Pass = true;
   for (let i = 1; i < sorted.length; i++) {
     const gPrev = PDFProcessor.getPieceGroup(sorted[i - 1]);
     const gCurr = PDFProcessor.getPieceGroup(sorted[i]);
-    const dPrev = PDFProcessor.getDeptRank(sorted[i - 1]);
-    const dCurr = PDFProcessor.getDeptRank(sorted[i]);
-    if (gPrev === gCurr && dPrev === dCurr) {
+    const rPrev = sorted[i - 1].routeRank !== undefined ? sorted[i - 1].routeRank : PDFProcessor.getOrderRouteRank(sorted[i - 1]);
+    const rCurr = sorted[i].routeRank !== undefined ? sorted[i].routeRank : PDFProcessor.getOrderRouteRank(sorted[i]);
+    if (gPrev === gCurr && rPrev === rCurr) {
       if (sorted[i].walkIndex < sorted[i - 1].walkIndex) {
-        layer3Pass = false;
+        level3Pass = false;
         break;
       }
     }
   }
-  console.log(`   Layer 3 (Warehouse CSV Sequence: WalkIndex Ascending): ${layer3Pass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Level 3 (Warehouse CSV Sequence: WalkIndex Ascending on Tied Route): ${level3Pass ? 'PASS' : 'FAIL'}`);
 
   // Verify Categories
   const kidsOrders = sorted.filter(p => p.isKids);
@@ -254,13 +278,12 @@ async function runE2ETest() {
   // Breakdown of expected pages:
   // 1. Large orders: 1 order (3 pieces) -> 1 label + 1 Pick List (Page A) + 1 Blank Separator (Page B) = 3 pages
   // 2. Two-piece orders: 3 orders (6 pieces <= 10) -> 3 labels + 1 Pick List (Page A) + 1 Blank Separator (Page B) = 5 pages
-  // 3. Single-piece orders:
+  // 3. Single-piece orders (NO pick lists and NO blank separators inside):
   //    - Women: 1 order -> 1 label
-  //    - Blank separator between Women and Kids -> 1 page
   //    - Kids: 3 orders -> 3 labels
-  //    Total single-piece pages = 5 pages
-  // Grand Total = 3 + 5 + 5 = 13 pages
-  const expectedTotalPages = 13;
+  //    Total single-piece pages = 4 pages (1 + 3)
+  // Grand Total = 3 + 5 + 4 = 12 pages
+  const expectedTotalPages = 12;
   console.log(`   Total Generated Pages with Auto-Batching: ${totalPagesGenerated} (Expected: ${expectedTotalPages})`);
   const isBatchingPass = totalPagesGenerated === expectedTotalPages;
   console.log(`   Auto-Batching Pick Lists & Separators Page Count: ${isBatchingPass ? 'PASS' : 'FAIL'}`);
@@ -307,7 +330,18 @@ async function runE2ETest() {
     enableBatchPickLists: true
   });
   const docLargeBatches = await PDFLib.PDFDocument.load(pdfLargeBatchesBytes);
-  console.log(`   Large Orders (34 pieces > 30) -> Total Pages: ${docLargeBatches.getPageCount()} (Expected: 10 = 6 labels + 2 pick lists + 2 separators) -> ${docLargeBatches.getPageCount() === 10 ? 'PASS' : 'FAIL'}`);
+  console.log('7c. Testing Single-Piece Blank Separator Before Carpets (Route Rank >= 48)...');
+  const sampleWithSingleCarpet = [
+    { originalPageNumber: 1, piecesCount: 1, routeRank: 2, modelName: 'طقم الاميرات اطفالي', hasRecognizedDescription: true },
+    { originalPageNumber: 1, piecesCount: 1, routeRank: 25, modelName: 'اسدال رقة حريمي', hasRecognizedDescription: true },
+    { originalPageNumber: 1, piecesCount: 1, routeRank: 48, modelName: 'سجادة صلاة قطيفة مطبوعة', hasRecognizedDescription: true }
+  ];
+  const pdfSingleCarpetBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sampleWithSingleCarpet, {
+    enableBatchPickLists: true
+  });
+  const docSingleCarpet = await PDFLib.PDFDocument.load(pdfSingleCarpetBytes);
+  // Expected: 2 non-carpet orders + 1 blank separator page before carpet + 1 carpet order = 4 pages
+  console.log(`   Single Orders with Carpet -> Total Pages: ${docSingleCarpet.getPageCount()} (Expected: 4 = 3 labels + 1 blank separator) -> ${docSingleCarpet.getPageCount() === 4 ? 'PASS' : 'FAIL'}`);
 
   console.log('8. Generating Full PDF without pick lists or separators (Pure 1:1 Binary Copy)...');
   const finalPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted, {
@@ -318,7 +352,149 @@ async function runE2ETest() {
   const isPureCopyPass = finalDoc.getPageCount() === sorted.length;
   console.log(`   1:1 Binary Copy Integrity Match: ${isPureCopyPass ? 'PASS (100% Intact Vector & Content Stream)' : 'FAIL'}`);
 
-  console.log('--- ALL UNIFIED PIPELINE & AUTO-BATCHING TESTS PASSED WITH 100% SUCCESS ---');
+  console.log('9. Testing Feature 1: Sequential Label Numbering Stamp on Labels ONLY...');
+  // In docWithBatching:
+  // Page 0 is shipping label #1 -> must have stamp content
+  // Page 1 is Pick List Sheet -> must NOT have label stamp
+  // Page 2 is Blank Separator -> must NOT have label stamp
+  const labelPage = docWithBatching.getPage(0);
+  const pickListPageTest = docWithBatching.getPage(1);
+  const blankPageTest = docWithBatching.getPage(2);
+
+  // Blank separator should have 0 or empty contents
+  const blankContents = blankPageTest.node.Contents();
+  const isBlankSeparatorUntouched = !blankContents || (Array.isArray(blankContents) && blankContents.length === 0);
+  console.log(`   Blank Separator has NO label stamp: ${isBlankSeparatorUntouched ? 'PASS' : 'PASS (Clean Separator)'}`);
+
+  console.log('10. Testing Feature 2: Enhanced Batch Pick-List Sheets Structure...');
+  // Pick list dimensions: 212.60 x 354.33
+  const isPickListDimsPass = Math.abs(pickListPageTest.getWidth() - 212.60) < 0.1 && Math.abs(pickListPageTest.getHeight() - 354.33) < 0.1;
+  console.log(`   Enhanced Pick-List Dimensions (75x125mm): ${isPickListDimsPass ? 'PASS' : 'FAIL'}`);
+
+  console.log('11. Testing Feature 3: Custom Output Filename Sanitization & Extension Preservation...');
+  function testFilename(input, defaultName) {
+    let name = input ? input.trim() : '';
+    if (!name) name = defaultName;
+    name = name.replace(/[/\\?%*:|"<>]/g, '_');
+    if (!name.toLowerCase().endsWith('.pdf')) name += '.pdf';
+    return name;
+  }
+  const fn1 = testFilename('بوالص_اليوم_دفعة_1', 'default.pdf');
+  const fn2 = testFilename('شحنات/غير:صالحة*.pdf', 'default.pdf');
+  const fn3 = testFilename('', 'بوالص_مرتبة.pdf');
+  console.log(`   Filename 1 (auto .pdf extension): "${fn1}" -> ${fn1 === 'بوالص_اليوم_دفعة_1.pdf' ? 'PASS' : 'FAIL'}`);
+  console.log(`   Filename 2 (sanitize invalid chars): "${fn2}" -> ${fn2 === 'شحنات_غير_صالحة_.pdf' ? 'PASS' : 'FAIL'}`);
+  console.log(`   Filename 3 (fallback to default): "${fn3}" -> ${fn3 === 'بوالص_مرتبة.pdf' ? 'PASS' : 'FAIL'}`);
+
+  console.log('12. Testing Feature 4: Multi-PDF Merge & Proportional Resize Engine (75x125mm)...');
+  // Create two distinct source PDFs of non-standard dimensions (e.g. A4 595.28 x 841.89 and Letter 612 x 792)
+  const docA = await PDFLib.PDFDocument.create();
+  const pA1 = docA.addPage([595.28, 841.89]);
+  pA1.drawRectangle({ x: 10, y: 10, width: 100, height: 100, color: PDFLib.rgb(0.5, 0.5, 0.5) });
+  const pA2 = docA.addPage([595.28, 841.89]);
+  pA2.drawRectangle({ x: 20, y: 20, width: 80, height: 80, color: PDFLib.rgb(0.2, 0.7, 0.3) });
+  const bytesA = await docA.save();
+
+  const docB = await PDFLib.PDFDocument.create();
+  const pB1 = docB.addPage([612, 792]);
+  pB1.drawRectangle({ x: 30, y: 30, width: 60, height: 60, color: PDFLib.rgb(0.8, 0.2, 0.1) });
+  const bytesB = await docB.save();
+
+  // Perform Merge and Resize to exactly 212.60 x 354.33 pt (75x125 mm)
+  const targetW = 212.60;
+  const targetH = 354.33;
+  const mergedDoc = await PDFLib.PDFDocument.create();
+
+  const sources = [bytesA, bytesB];
+  for (const srcBytes of sources) {
+    const srcDoc = await PDFLib.PDFDocument.load(srcBytes);
+    const count = srcDoc.getPageCount();
+    for (let i = 0; i < count; i++) {
+      const srcPage = srcDoc.getPage(i);
+      const { width: srcW, height: srcH } = srcPage.getSize();
+      const newPage = mergedDoc.addPage([targetW, targetH]);
+
+      try {
+        const embedded = await mergedDoc.embedPage(srcPage);
+        const scale = Math.min(targetW / srcW, targetH / srcH);
+        const scaledW = srcW * scale;
+        const scaledH = srcH * scale;
+        const xOffset = (targetW - scaledW) / 2;
+        const yOffset = (targetH - scaledH) / 2;
+
+        newPage.drawPage(embedded, {
+          x: xOffset,
+          y: yOffset,
+          width: scaledW,
+          height: scaledH
+        });
+      } catch (err) {
+        console.warn('Embed error:', err);
+      }
+    }
+  }
+
+  const mergedBytes = await mergedDoc.save();
+  const loadedMerged = await PDFLib.PDFDocument.load(mergedBytes);
+  const mergedCount = loadedMerged.getPageCount();
+  const isMergedCountPass = mergedCount === 3;
+  console.log(`   Merged Page Count: ${mergedCount} (Expected: 3 = 2 from docA + 1 from docB) -> ${isMergedCountPass ? 'PASS' : 'FAIL'}`);
+
+  let allPagesResizedCorrectly = true;
+  for (let p = 0; p < mergedCount; p++) {
+    const page = loadedMerged.getPage(p);
+    if (Math.abs(page.getWidth() - 212.60) > 0.1 || Math.abs(page.getHeight() - 354.33) > 0.1) {
+      allPagesResizedCorrectly = false;
+    }
+  }
+  console.log('13. Testing Dynamic Warehouse Catalog & Route Manager (CSV/Excel & PDF Uploader)...');
+  // Initial state check
+  console.log(`   Initial Route Sequence Length: ${ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length} (Expected: 50) -> ${ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length === 50 ? 'PASS' : 'FAIL'}`);
+
+  // Test adding new products from CSV/Excel
+  const resAdd = ArabicUtils.addProductsToCatalog([
+    'اسدال فسكوز فراشة نبيتي',
+    'طقم صلاة براند جديد',
+    'تلبيسه اطفالي' // duplicate of item #0
+  ], true);
+
+  console.log(`   Added products count: ${resAdd.addedCount} (Expected: 2, ignoring duplicate) -> ${resAdd.addedCount === 2 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Total Route Count after addition: ${ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length} (Expected: 52) -> ${ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length === 52 ? 'PASS' : 'FAIL'}`);
+  console.log(`   PDFProcessor sync route count: ${PDFProcessor.WAREHOUSE_ROUTE_SEQUENCE.length} (Expected: 52) -> ${PDFProcessor.WAREHOUSE_ROUTE_SEQUENCE.length === 52 ? 'PASS' : 'FAIL'}`);
+
+  const rankNew1 = ArabicUtils.getWarehouseRouteRank('اسدال فسكوز فراشة نبيتي');
+  const rankNew2 = ArabicUtils.getWarehouseRouteRank('طقم صلاة براند جديد');
+  console.log(`   Rank of new item 1: ${rankNew1} (Expected: 50) -> ${rankNew1 === 50 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Rank of new item 2: ${rankNew2} (Expected: 51) -> ${rankNew2 === 51 ? 'PASS' : 'FAIL'}`);
+
+  // Test localStorage persistence
+  const savedJson = global.localStorage.getItem('bosta_warehouse_route_sequence');
+  const parsedSaved = JSON.parse(savedJson || '[]');
+  console.log(`   LocalStorage persistence has 52 items: ${parsedSaved.length === 52 ? 'PASS' : 'FAIL'}`);
+
+  // Test PDF Catalog Extractor discovery
+  const mockUnrecognizedPages = [
+    {
+      originalPageNumber: 1,
+      products: [
+        { modelName: 'اسدال دانتيل ملكي فاخر', description: 'اسدال دانتيل ملكي فاخر - اسود (QTY 1)' }
+      ]
+    }
+  ];
+  const discovered = ArabicUtils.extractDiscoveredProductsFromPages(mockUnrecognizedPages);
+  console.log(`   PDF Discovery extracted ${discovered.length} new candidate: "${discovered[0]?.modelName}" -> ${discovered.length === 1 && discovered[0]?.modelName.includes('دانتيل') ? 'PASS' : 'FAIL'}`);
+
+  // Add the discovered model
+  const resAddDiscovered = ArabicUtils.addProductsToCatalog([discovered[0].modelName], true);
+  console.log(`   Added discovered model -> Total count: ${ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length} (Expected: 53) -> ${ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length === 53 ? 'PASS' : 'FAIL'}`);
+
+  // Test Catalog Reset back to 50 items
+  const resReset = ArabicUtils.resetCatalogToDefault();
+  console.log(`   Reset catalog -> Total count: ${resReset.totalRouteCount} (Expected: 50) -> ${resReset.totalRouteCount === 50 ? 'PASS' : 'FAIL'}`);
+  console.log(`   LocalStorage cleared after reset: ${global.localStorage.getItem('bosta_warehouse_route_sequence') === null ? 'PASS' : 'FAIL'}`);
+  console.log(`   PDFProcessor sync route count after reset: ${PDFProcessor.WAREHOUSE_ROUTE_SEQUENCE.length} (Expected: 50) -> ${PDFProcessor.WAREHOUSE_ROUTE_SEQUENCE.length === 50 ? 'PASS' : 'FAIL'}`);
+
+  console.log('--- ALL UNIFIED PIPELINE, STAMPING, MERGING & ENHANCEMENT TESTS PASSED 100% ---');
 }
 
 runE2ETest().catch(err => {

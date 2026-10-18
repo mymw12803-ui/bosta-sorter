@@ -37,13 +37,52 @@ document.addEventListener('DOMContentLoaded', () => {
     pdfFileInfo: document.getElementById('pdf-file-info'),
     pdfFileName: document.getElementById('pdf-file-name'),
     pdfFileSize: document.getElementById('pdf-file-size'),
-    removePdfBtn: document.getElementById('remove-pdf-btn'),
+    // Custom Filename Input (Feature 3)
+    customFilenameInput: document.getElementById('custom-filename-input'),
+
+    // Multi-PDF Merge & Resize Tool (Feature 4)
+    multiPdfContainer: document.getElementById('multi-pdf-container'),
+    toggleMultiPdfBtn: document.getElementById('toggle-multi-pdf-btn'),
+    multiPdfContent: document.getElementById('multi-pdf-content'),
+    multiPdfChevron: document.getElementById('multi-pdf-chevron'),
+    multiPdfCountBadge: document.getElementById('multi-pdf-count-badge'),
+    multiPdfDropzone: document.getElementById('multi-pdf-dropzone'),
+    multiPdfInput: document.getElementById('multi-pdf-input'),
+    multiPdfListContainer: document.getElementById('multi-pdf-list-container'),
+    multiPdfFileList: document.getElementById('multi-pdf-file-list'),
+    clearMultiPdfBtn: document.getElementById('clear-multi-pdf-btn'),
+    mergeAndProcessBtn: document.getElementById('merge-and-process-btn'),
+
+    // Dynamic Warehouse Catalog & Route Manager Elements
+    toggleCatalogManagerBtn: document.getElementById('toggle-catalog-manager-btn'),
+    catalogManagerContent: document.getElementById('catalog-manager-content'),
+    catalogManagerChevron: document.getElementById('catalog-manager-chevron'),
+    catalogStatusBadge: document.getElementById('catalog-status-badge'),
+    catalogInfoText: document.getElementById('catalog-info-text'),
+    catalogResetBtn: document.getElementById('catalog-reset-btn'),
+    catalogExportBtn: document.getElementById('catalog-export-btn'),
+    catalogToggleViewBtn: document.getElementById('catalog-toggle-view-btn'),
+    catalogExcelDropzone: document.getElementById('catalog-excel-dropzone'),
+    catalogExcelInput: document.getElementById('catalog-excel-input'),
+    catalogExcelResult: document.getElementById('catalog-excel-result'),
+    catalogPdfDropzone: document.getElementById('catalog-pdf-dropzone'),
+    catalogPdfInput: document.getElementById('catalog-pdf-input'),
+    catalogPdfStatus: document.getElementById('catalog-pdf-status'),
+    catalogDiscoveredSection: document.getElementById('catalog-discovered-section'),
+    catalogDiscoveredChips: document.getElementById('catalog-discovered-chips'),
+    catalogAddAllDiscoveredBtn: document.getElementById('catalog-add-all-discovered-btn'),
+    catalogInspectorSection: document.getElementById('catalog-inspector-section'),
+    catalogInspectorCount: document.getElementById('catalog-inspector-count'),
+    catalogInspectorSearch: document.getElementById('catalog-inspector-search'),
+    catalogInspectorItems: document.getElementById('catalog-inspector-items'),
 
     inventoryDropzone: document.getElementById('inventory-dropzone'),
     inventoryInput: document.getElementById('inventory-input'),
     inventoryFileInfo: document.getElementById('inventory-file-info'),
     inventoryFileName: document.getElementById('inventory-file-name'),
     inventoryFileSize: document.getElementById('inventory-file-size'),
+    inventoryStatusPill: document.getElementById('inventory-status-pill'),
+    inventoryConnectedBadge: document.getElementById('inventory-connected-badge'),
     removeInventoryBtn: document.getElementById('remove-inventory-btn'),
 
     // Unified Pipeline Toggles
@@ -312,6 +351,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await InventoryParser.parseFile(arrayBuffer);
       elements.inventoryFileName.textContent = file.name;
       elements.inventoryFileSize.textContent = `${formatFileSize(file.size)} (${res.totalItems} صنف، ${res.uniqueSkus} SKU)`;
+      if (elements.inventoryStatusPill) {
+        elements.inventoryStatusPill.textContent = `تم ربط شيت المخزن: ${res.totalItems} صنف`;
+        elements.inventoryStatusPill.className = 'text-xs bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded border border-emerald-500/30 font-bold';
+      }
+      if (elements.inventoryConnectedBadge) {
+        elements.inventoryConnectedBadge.textContent = `تم ربط شيت المخزن: ${res.totalItems} صنف (${res.uniqueSkus} SKU)`;
+      }
       elements.inventoryFileInfo.classList.remove('hidden');
       elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.add('hidden');
 
@@ -364,6 +410,10 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.inventoryInput.value = '';
     elements.inventoryFileInfo.classList.add('hidden');
     elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
+    if (elements.inventoryStatusPill) {
+      elements.inventoryStatusPill.textContent = 'اختياري';
+      elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
+    }
     showToast('تمت إزالة ملف المخزون.', 'info');
   });
 
@@ -371,46 +421,698 @@ document.addEventListener('DOMContentLoaded', () => {
   setupDropzone(elements.pdfDropzone, elements.pdfInput, handlePdfFile);
   setupDropzone(elements.inventoryDropzone, elements.inventoryInput, handleInventoryFile);
 
-  // Walk Sequence Toggle Updater
-  function updateWalkSequence(enabled) {
-    state.useWalkSequence = Boolean(enabled);
-    if (elements.walkSequenceToggle) elements.walkSequenceToggle.checked = state.useWalkSequence;
-    if (elements.panelWalkSequenceToggle) elements.panelWalkSequenceToggle.checked = state.useWalkSequence;
-    if (state.extractedPages.length > 0) {
-      reSortAndRender();
-      showToast(state.useWalkSequence ? 'تم تفعيل الترتيب حسب مسار ممرات المخزن (CSV).' : 'تم إيقاف ترتيب الممرات.', 'info');
+  // ==========================================
+  // Feature 4: Multi-PDF Merge & Resize Engine
+  // ==========================================
+  let multiPdfFiles = [];
+
+  // Toggle Multi-PDF Accordion Card
+  if (elements.toggleMultiPdfBtn && elements.multiPdfContent) {
+    elements.toggleMultiPdfBtn.addEventListener('click', () => {
+      const isHidden = elements.multiPdfContent.classList.contains('hidden');
+      elements.multiPdfContent.classList.toggle('hidden', !isHidden);
+      if (elements.multiPdfChevron) {
+        elements.multiPdfChevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+      }
+    });
+  }
+
+  // Setup Multi-PDF Dropzone & Input
+  if (elements.multiPdfDropzone && elements.multiPdfInput) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+      elements.multiPdfDropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        elements.multiPdfDropzone.classList.add('border-indigo-400', 'bg-indigo-950/20');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      elements.multiPdfDropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        elements.multiPdfDropzone.classList.remove('border-indigo-400', 'bg-indigo-950/20');
+      });
+    });
+
+    elements.multiPdfDropzone.addEventListener('drop', async (e) => {
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      if (files.length > 0) {
+        await addMultiPdfFiles(files);
+      }
+    });
+
+    elements.multiPdfDropzone.addEventListener('click', (e) => {
+      if (e.target.closest('#clear-multi-pdf-btn') || e.target.closest('.file-action-btn')) return;
+      elements.multiPdfInput.click();
+    });
+
+    elements.multiPdfInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      if (files.length > 0) {
+        await addMultiPdfFiles(files);
+      }
+      elements.multiPdfInput.value = '';
+    });
+  }
+
+  async function addMultiPdfFiles(newFiles) {
+    for (const f of newFiles) {
+      try {
+        const buf = await f.arrayBuffer();
+        let pagesCount = 1;
+        if (typeof PDFLib !== 'undefined') {
+          try {
+            const doc = await PDFLib.PDFDocument.load(buf.slice(0), { ignoreEncryption: true });
+            pagesCount = doc.getPageCount();
+          } catch (_) {}
+        }
+        multiPdfFiles.push({
+          id: 'pdf_' + Math.random().toString(36).substring(2, 9),
+          file: f,
+          name: f.name,
+          size: f.size,
+          buffer: buf,
+          pageCount: pagesCount
+        });
+      } catch (err) {
+        console.warn('Error reading multi pdf file:', f.name, err);
+      }
+    }
+    renderMultiPdfList();
+    showToast(`تمت إضافة ${newFiles.length} ملفات إلى قائمة الدمج.`, 'info');
+  }
+
+  function renderMultiPdfList() {
+    if (!elements.multiPdfFileList || !elements.multiPdfListContainer) return;
+
+    if (multiPdfFiles.length === 0) {
+      elements.multiPdfListContainer.classList.add('hidden');
+      if (elements.multiPdfCountBadge) elements.multiPdfCountBadge.classList.add('hidden');
+      if (elements.mergeAndProcessBtn) elements.mergeAndProcessBtn.disabled = true;
+      elements.multiPdfFileList.innerHTML = '';
+      return;
+    }
+
+    elements.multiPdfListContainer.classList.remove('hidden');
+    if (elements.multiPdfCountBadge) {
+      elements.multiPdfCountBadge.textContent = `${multiPdfFiles.length} ملفات`;
+      elements.multiPdfCountBadge.classList.remove('hidden');
+    }
+    if (elements.mergeAndProcessBtn) elements.mergeAndProcessBtn.disabled = false;
+
+    elements.multiPdfFileList.innerHTML = multiPdfFiles.map((item, idx) => `
+      <div class="flex items-center justify-between p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs hover:border-slate-700 transition" data-id="${item.id}">
+        <div class="flex items-center gap-3 overflow-hidden">
+          <span class="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-[11px] border border-indigo-500/30 flex-shrink-0">
+            ${idx + 1}
+          </span>
+          <div class="truncate">
+            <span class="font-semibold text-slate-200 block truncate" title="${item.name}">${item.name}</span>
+            <span class="text-[10px] text-slate-400 font-mono">${formatFileSize(item.size)} • ${item.pageCount} صفحة</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1 flex-shrink-0 mr-2">
+          <button class="file-action-btn p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition disabled:opacity-20" title="تحريك لأعلى" onclick="moveMultiPdfItem(${idx}, -1)" ${idx === 0 ? 'disabled' : ''}>
+            ▲
+          </button>
+          <button class="file-action-btn p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition disabled:opacity-20" title="تحريك لأسفل" onclick="moveMultiPdfItem(${idx}, 1)" ${idx === multiPdfFiles.length - 1 ? 'disabled' : ''}>
+            ▼
+          </button>
+          <button class="file-action-btn p-1.5 rounded hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 transition" title="حذف" onclick="removeMultiPdfItem(${idx})">
+            ✕
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  window.moveMultiPdfItem = function(index, direction) {
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= multiPdfFiles.length) return;
+    const temp = multiPdfFiles[index];
+    multiPdfFiles[index] = multiPdfFiles[targetIdx];
+    multiPdfFiles[targetIdx] = temp;
+    renderMultiPdfList();
+  };
+
+  window.removeMultiPdfItem = function(index) {
+    multiPdfFiles.splice(index, 1);
+    renderMultiPdfList();
+  };
+
+  if (elements.clearMultiPdfBtn) {
+    elements.clearMultiPdfBtn.addEventListener('click', () => {
+      multiPdfFiles = [];
+      renderMultiPdfList();
+      showToast('تم إفراغ قائمة ملفات الدمج.', 'info');
+    });
+  }
+
+  // One-Click Merge & Resize Engine to exactly 75x125 mm (212.60 x 354.33 pt)
+  if (elements.mergeAndProcessBtn) {
+    elements.mergeAndProcessBtn.addEventListener('click', async () => {
+      if (multiPdfFiles.length === 0) {
+        showToast('يرجى إضافة ملفات PDF أولاً للدمج والتصغير.', 'error');
+        return;
+      }
+      if (typeof PDFLib === 'undefined') {
+        showToast('مكتبة PDFLib غير متوفرة في الصفحة.', 'error');
+        return;
+      }
+
+      elements.mergeAndProcessBtn.disabled = true;
+      const originalBtnText = elements.mergeAndProcessBtn.innerHTML;
+      elements.mergeAndProcessBtn.innerHTML = `
+        <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+        <span>جاري الدمج والتصغير لمقاس 75×125 ملم...</span>
+      `;
+
+      elements.progressSection.classList.remove('hidden');
+      elements.progressBar.style.width = '20%';
+      elements.progressPercent.textContent = '20%';
+      elements.progressStatus.textContent = 'جاري دمج الملفات وتنسيق أبعاد الصفحات...';
+
+      try {
+        const targetW = 212.60;
+        const targetH = 354.33;
+        const mergedDoc = await PDFLib.PDFDocument.create();
+
+        let totalMergedPages = 0;
+        for (let fIdx = 0; fIdx < multiPdfFiles.length; fIdx++) {
+          const item = multiPdfFiles[fIdx];
+          const srcDoc = await PDFLib.PDFDocument.load(item.buffer.slice(0), { ignoreEncryption: true });
+          const count = srcDoc.getPageCount();
+
+          for (let pIdx = 0; pIdx < count; pIdx++) {
+            const srcPage = srcDoc.getPage(pIdx);
+            const { width: srcW, height: srcH } = srcPage.getSize();
+            const newPage = mergedDoc.addPage([targetW, targetH]);
+
+            try {
+              const embedded = await mergedDoc.embedPage(srcPage);
+              const scale = Math.min(targetW / srcW, targetH / srcH);
+              const scaledW = srcW * scale;
+              const scaledH = srcH * scale;
+              const xOffset = (targetW - scaledW) / 2;
+              const yOffset = (targetH - scaledH) / 2;
+
+              newPage.drawPage(embedded, {
+                x: xOffset,
+                y: yOffset,
+                width: scaledW,
+                height: scaledH
+              });
+            } catch (embedErr) {
+              console.warn(`Could not embed page ${pIdx + 1} of ${item.name}:`, embedErr);
+            }
+            totalMergedPages++;
+          }
+        }
+
+        const mergedPdfBytes = await mergedDoc.save();
+        window.rawUntouchedPdfBytes = new Uint8Array(mergedPdfBytes);
+        state.masterPdfBytes = window.rawUntouchedPdfBytes;
+        state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
+        state.pdfFileName = `بوالص_مدمجة_ومصغرة_${multiPdfFiles.length}_ملفات.pdf`;
+
+        // Update Dropzone UI
+        elements.pdfFileName.textContent = state.pdfFileName;
+        elements.pdfFileSize.textContent = `${formatFileSize(mergedPdfBytes.byteLength)} (${totalMergedPages} صفحة)`;
+        elements.pdfFileInfo.classList.remove('hidden');
+        elements.pdfDropzone.querySelector('.dropzone-prompt').classList.add('hidden');
+        elements.processBtn.disabled = false;
+
+        showToast(`تم دمج وتصغير ${multiPdfFiles.length} ملفات (${totalMergedPages} صفحة) بنجاح! جاري الفرز التلقائي...`, 'success');
+
+        // Automatically feed merged buffer into parsing & sorting pipeline
+        await processLabels();
+      } catch (err) {
+        console.error('Merge error:', err);
+        showErrorModal(`خطأ تقني أثناء دمج وتصغير الملفات:\n\n${err.message || err}`);
+      } finally {
+        elements.mergeAndProcessBtn.disabled = false;
+        elements.mergeAndProcessBtn.innerHTML = originalBtnText;
+      }
+    });
+  }
+
+  // ==========================================
+  // Feature 3: Custom Output Filename
+  // ==========================================
+  function getCustomExportFilename(defaultName = 'Bosta_Sorted.pdf') {
+    let name = elements.customFilenameInput ? elements.customFilenameInput.value.trim() : '';
+    if (!name) {
+      name = defaultName;
+    }
+    // Clean invalid characters: / \ : * ? " < > |
+    name = name.replace(/[/\\?%*:|"<>]/g, '_');
+    if (!name.toLowerCase().endsWith('.pdf')) {
+      name += '.pdf';
+    }
+    return name;
+  }
+
+  function updateDefaultFilename() {
+    if (!elements.customFilenameInput) return;
+    const today = new Date().toISOString().slice(0, 10);
+    let filterPart = '';
+    if (state.activeFilter === 'kids') filterPart = '_أطفالي';
+    else if (state.activeFilter === 'women') filterPart = '_حريمي';
+    else if (state.activeFilter === 'other') filterPart = '_منتجات_أخرى';
+    else if (state.activeFilter === 'multi') filterPart = '_متعدد_القطع';
+    else if (state.activeFilter === 'single') filterPart = '_قطعة_واحدة';
+
+    const defaultFilename = `بوالص_بوسطة_مرتبة${filterPart}_${today}.pdf`;
+    elements.customFilenameInput.placeholder = defaultFilename;
+    if (!elements.customFilenameInput.dataset.userEdited) {
+      elements.customFilenameInput.value = defaultFilename;
     }
   }
 
-  if (elements.walkSequenceToggle) {
-    elements.walkSequenceToggle.addEventListener('change', (e) => updateWalkSequence(e.target.checked));
-  }
-  if (elements.panelWalkSequenceToggle) {
-    elements.panelWalkSequenceToggle.addEventListener('change', (e) => updateWalkSequence(e.target.checked));
+  if (elements.customFilenameInput) {
+    updateDefaultFilename();
+    elements.customFilenameInput.addEventListener('input', () => {
+      elements.customFilenameInput.dataset.userEdited = 'true';
+      try {
+        localStorage.setItem('bosta_custom_filename', elements.customFilenameInput.value);
+      } catch (e) {}
+    });
   }
 
-  // Batch Pick Lists & Blank Separators Toggle Updater
-  function updateBatchPickLists(enabled) {
-    state.enableBatchPickLists = Boolean(enabled);
-    state.insertBlankSeparators = state.enableBatchPickLists;
-    if (elements.batchPicklistsToggle) elements.batchPicklistsToggle.checked = state.enableBatchPickLists;
-    if (elements.panelBatchPicklistsToggle) elements.panelBatchPicklistsToggle.checked = state.enableBatchPickLists;
-    if (elements.panelSeparatorBadge) {
-      elements.panelSeparatorBadge.textContent = state.enableBatchPickLists
-        ? 'بطاقات التجميع والفواصل مفعلة'
-        : 'بطاقات التجميع والفواصل معطلة';
-      elements.panelSeparatorBadge.className = state.enableBatchPickLists
-        ? 'hidden sm:inline text-[11px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-medium border border-sky-500/30'
-        : 'hidden sm:inline text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-medium border border-slate-700';
+  // ==========================================
+  // Dynamic Warehouse Catalog & Route Manager
+  // ==========================================
+  let discoveredPdfProducts = [];
+
+  function updateCatalogUI() {
+    const count = (typeof ArabicUtils !== 'undefined' && ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE)
+      ? ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length
+      : 50;
+
+    if (elements.catalogStatusBadge) {
+      elements.catalogStatusBadge.textContent = `📊 الكتالوج النشط: ${count} صنفاً معتمداً`;
     }
-    showToast(state.enableBatchPickLists ? 'تم تفعيل بطاقات تجميع الدفعات والصفحات البيضاء الفاصلة.' : 'تم تعطيل بطاقات التجميع والفواصل.', 'info');
+    if (elements.catalogInfoText) {
+      elements.catalogInfoText.textContent = `الكتالوج النشط حالياً يضم ${count} صنف وموديل معتمد.`;
+    }
+    if (elements.catalogInspectorCount) {
+      elements.catalogInspectorCount.textContent = `${count} موديلاً`;
+    }
+    const stratText = document.getElementById('active-strategy-text');
+    if (stratText) {
+      stratText.textContent = `الترتيب النشط: عدد القطع تنازلياً ➔ مسار ممرات المخزن (${count} موديلاً معتمداً)`;
+    }
+    renderCatalogInspectorItems();
   }
 
-  if (elements.batchPicklistsToggle) {
-    elements.batchPicklistsToggle.addEventListener('change', (e) => updateBatchPickLists(e.target.checked));
+  function renderCatalogInspectorItems(query = '') {
+    if (!elements.catalogInspectorItems) return;
+    const items = (typeof ArabicUtils !== 'undefined' && ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE)
+      ? ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE
+      : [];
+
+    const normQuery = (query || '').trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+
+    const filtered = items.map((item, idx) => ({ item, index: idx })).filter(entry => {
+      if (!normQuery) return true;
+      const norm = entry.item.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+      return norm.includes(normQuery);
+    });
+
+    if (filtered.length === 0) {
+      elements.catalogInspectorItems.innerHTML = `
+        <div class="col-span-full py-4 text-center text-xs text-slate-500">
+          لا توجد أصناف مطابقة لكلمة البحث "${query}".
+        </div>
+      `;
+      return;
+    }
+
+    elements.catalogInspectorItems.innerHTML = filtered.map(entry => `
+      <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-xs hover:border-teal-500/40 transition">
+        <div class="flex items-center gap-2 overflow-hidden">
+          <span class="w-5 h-5 rounded bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+            ${entry.index + 1}
+          </span>
+          <span class="text-slate-200 truncate font-medium" title="${entry.item}">
+            ${entry.item}
+          </span>
+        </div>
+        <button class="remove-catalog-item-btn p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-slate-800 transition shrink-0 mr-1" title="حذف من المسار" onclick="removeCatalogItem(${entry.index})">
+          ✕
+        </button>
+      </div>
+    `).join('');
   }
-  if (elements.panelBatchPicklistsToggle) {
-    elements.panelBatchPicklistsToggle.addEventListener('change', (e) => updateBatchPickLists(e.target.checked));
+
+  window.removeCatalogItem = function(index) {
+    if (typeof ArabicUtils === 'undefined') return;
+    const res = ArabicUtils.removeProductFromCatalog(index);
+    if (res.removed) {
+      showToast(`تم حذف (${res.removed}) من مسار ممرات المخزن. المتبقي: ${res.totalRouteCount}`, 'info');
+      updateCatalogUI();
+      if (state.extractedPages.length > 0) reSortAndRender();
+    }
+  };
+
+  // Toggle Accordion for Catalog Manager
+  if (elements.toggleCatalogManagerBtn && elements.catalogManagerContent) {
+    elements.toggleCatalogManagerBtn.addEventListener('click', () => {
+      const isHidden = elements.catalogManagerContent.classList.contains('hidden');
+      if (isHidden) {
+        elements.catalogManagerContent.classList.remove('hidden');
+        if (elements.catalogManagerChevron) elements.catalogManagerChevron.classList.add('rotate-180');
+        renderCatalogInspectorItems();
+      } else {
+        elements.catalogManagerContent.classList.add('hidden');
+        if (elements.catalogManagerChevron) elements.catalogManagerChevron.classList.remove('rotate-180');
+      }
+    });
+  }
+
+  // Toggle View of Active Catalog Items
+  if (elements.catalogToggleViewBtn) {
+    elements.catalogToggleViewBtn.addEventListener('click', () => {
+      if (!elements.catalogInspectorSection) return;
+      const isHidden = elements.catalogInspectorSection.classList.contains('hidden');
+      if (isHidden) {
+        elements.catalogInspectorSection.classList.remove('hidden');
+        elements.catalogToggleViewBtn.innerHTML = '<span>👁️ إخفاء أصناف المسار</span>';
+        renderCatalogInspectorItems();
+      } else {
+        elements.catalogInspectorSection.classList.add('hidden');
+        elements.catalogToggleViewBtn.innerHTML = '<span>👁️ عرض أصناف المسار</span>';
+      }
+    });
+  }
+
+  // Search in catalog items
+  if (elements.catalogInspectorSearch) {
+    elements.catalogInspectorSearch.addEventListener('input', (e) => {
+      renderCatalogInspectorItems(e.target.value);
+    });
+  }
+
+  // Reset catalog to 50 defaults
+  if (elements.catalogResetBtn) {
+    elements.catalogResetBtn.addEventListener('click', () => {
+      if (confirm('هل أنت متأكد من رغبتك في استعادة قائمة ممرات المخزن الافتراضية (50 موديلاً) وحذف أي إضافات مخصصة؟')) {
+        ArabicUtils.resetCatalogToDefault();
+        updateCatalogUI();
+        if (elements.catalogExcelResult) elements.catalogExcelResult.classList.add('hidden');
+        if (elements.catalogDiscoveredSection) elements.catalogDiscoveredSection.classList.add('hidden');
+        if (state.extractedPages.length > 0) reSortAndRender();
+        showToast('تمت استعادة كتالوج ممرات المخزن الافتراضي المعتمد (50 موديلاً).', 'success');
+      }
+    });
+  }
+
+  // Export current catalog as CSV
+  if (elements.catalogExportBtn) {
+    elements.catalogExportBtn.addEventListener('click', () => {
+      const items = ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE || [];
+      const lines = ['Sequence_Rank,Model_Name'];
+      items.forEach((item, idx) => {
+        lines.push(`${idx + 1},"${item.replace(/"/g, '""')}"`);
+      });
+      const csvContent = '\uFEFF' + lines.join('\n'); // BOM for Arabic Excel
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const today = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `Warehouse_Route_Catalog_${today}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      showToast('تم تصدير كتالوج ممرات المخزن كملف CSV بنجاح!', 'success');
+    });
+  }
+
+  // 1. Dynamic Catalog Uploader (CSV / Excel)
+  if (elements.catalogExcelDropzone && elements.catalogExcelInput) {
+    elements.catalogExcelDropzone.addEventListener('click', () => elements.catalogExcelInput.click());
+
+    elements.catalogExcelDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      elements.catalogExcelDropzone.classList.add('border-teal-400', 'bg-teal-950/30');
+    });
+
+    elements.catalogExcelDropzone.addEventListener('dragleave', () => {
+      elements.catalogExcelDropzone.classList.remove('border-teal-400', 'bg-teal-950/30');
+    });
+
+    elements.catalogExcelDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      elements.catalogExcelDropzone.classList.remove('border-teal-400', 'bg-teal-950/30');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleCatalogExcelFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    elements.catalogExcelInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleCatalogExcelFile(e.target.files[0]);
+      }
+    });
+  }
+
+  async function handleCatalogExcelFile(file) {
+    if (!file) return;
+    try {
+      if (typeof XLSX === 'undefined') {
+        showToast('مكتبة SheetJS غير متوفرة لمعالجة الملف.', 'error');
+        return;
+      }
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+      if (!rawRows || rawRows.length === 0) {
+        showToast('الملف المرفوع فارغ ولا يحتوي على صفوف بيانات.', 'error');
+        return;
+      }
+
+      const extractedTitles = [];
+      const titleAliases = ['title', 'اسم المنتج', 'اسم الموديل', 'المنتج', 'product name', 'handle', 'item'];
+
+      for (const row of rawRows) {
+        let foundTitle = '';
+        for (const k of Object.keys(row)) {
+          const lk = k.trim().toLowerCase();
+          if (titleAliases.some(alias => lk.includes(alias))) {
+            const val = String(row[k] || '').trim();
+            if (val && val.length >= 3) {
+              foundTitle = val;
+              break;
+            }
+          }
+        }
+        if (foundTitle) {
+          extractedTitles.push(foundTitle);
+        }
+      }
+
+      if (extractedTitles.length === 0) {
+        showToast('لم يتم العثور على عمود يحمل أسماء المنتجات (Title / اسم المنتج).', 'error');
+        return;
+      }
+
+      const res = ArabicUtils.addProductsToCatalog(extractedTitles, true);
+      updateCatalogUI();
+      if (state.extractedPages.length > 0) reSortAndRender();
+
+      if (elements.catalogExcelResult) {
+        elements.catalogExcelResult.classList.remove('hidden');
+        elements.catalogExcelResult.innerHTML = `
+          <div class="font-bold mb-0.5">✅ نتيجة فحص ودمج ملف الشيت (${file.name}):</div>
+          <div>تم فحص ${extractedTitles.length} صنف، وإضافة ${res.addedCount} موديل جديد إلى مسار المخزن!</div>
+          <div class="text-[10px] text-emerald-400 mt-0.5">إجمالي كتالوج المخزن النشط حالياً: ${res.totalRouteCount} صنف معتمد (تم الحفظ في المتصفح).</div>
+        `;
+      }
+
+      if (res.addedCount > 0) {
+        showToast(`تمت إضافة ${res.addedCount} موديل جديد لمسار المخزن بنجاح!`, 'success');
+      } else {
+        showToast(`جميع أصناف الملف (${res.totalRouteCount}) موجودة بالفعل في كتالوج المخزن.`, 'info');
+      }
+    } catch (err) {
+      console.error('Catalog Excel error:', err);
+      showToast(`فشل قراءة ملف الإكسيل/CSV: ${err.message || err}`, 'error');
+    }
+  }
+
+  // 2. Dynamic PDF Catalog Extractor
+  if (elements.catalogPdfDropzone && elements.catalogPdfInput) {
+    elements.catalogPdfDropzone.addEventListener('click', () => elements.catalogPdfInput.click());
+
+    elements.catalogPdfDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      elements.catalogPdfDropzone.classList.add('border-purple-400', 'bg-purple-950/30');
+    });
+
+    elements.catalogPdfDropzone.addEventListener('dragleave', () => {
+      elements.catalogPdfDropzone.classList.remove('border-purple-400', 'bg-purple-950/30');
+    });
+
+    elements.catalogPdfDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      elements.catalogPdfDropzone.classList.remove('border-purple-400', 'bg-purple-950/30');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleCatalogPdfFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    elements.catalogPdfInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleCatalogPdfFile(e.target.files[0]);
+      }
+    });
+  }
+
+  async function handleCatalogPdfFile(file) {
+    if (!file) return;
+    try {
+      if (elements.catalogPdfStatus) {
+        elements.catalogPdfStatus.classList.remove('hidden');
+        elements.catalogPdfStatus.className = 'p-2.5 rounded-lg text-[11px] bg-slate-900 text-slate-300 border border-slate-700 flex items-center gap-2';
+        elements.catalogPdfStatus.innerHTML = `
+          <div class="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+          <span>جاري فحص نصوص ملف الـ PDF واستخراج الموديلات غير المسجلة...</span>
+        `;
+      }
+
+      const buffer = await file.arrayBuffer();
+      const extractedPages = await PDFProcessor.extractPages(buffer);
+      const discovered = ArabicUtils.extractDiscoveredProductsFromPages(extractedPages);
+      discoveredPdfProducts = discovered;
+
+      if (discovered.length === 0) {
+        if (elements.catalogPdfStatus) {
+          elements.catalogPdfStatus.className = 'p-2.5 rounded-lg text-[11px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+          elements.catalogPdfStatus.innerHTML = `✅ جميع الموديلات المستخرجة من هذا الملف مسجلة بالفعل في مسار ممرات المخزن.`;
+        }
+        if (elements.catalogDiscoveredSection) elements.catalogDiscoveredSection.classList.add('hidden');
+        showToast('لم يتم العثور على أي موديلات جديدة غير مسجلة في هذا الملف.', 'info');
+      } else {
+        if (elements.catalogPdfStatus) {
+          elements.catalogPdfStatus.className = 'p-2.5 rounded-lg text-[11px] bg-purple-500/15 text-purple-200 border border-purple-500/30';
+          elements.catalogPdfStatus.innerHTML = `⚠️ تم اكتشاف <b>${discovered.length}</b> موديل جديد غير مسجل في ممرات المخزن!`;
+        }
+        renderDiscoveredChips(discovered);
+        if (elements.catalogDiscoveredSection) elements.catalogDiscoveredSection.classList.remove('hidden');
+        showToast(`تم اكتشاف ${discovered.length} موديل جديد! يمكنك إضافتهم لمسار المخزن الآن.`, 'success');
+      }
+    } catch (err) {
+      console.error('Catalog PDF extract error:', err);
+      if (elements.catalogPdfStatus) {
+        elements.catalogPdfStatus.className = 'p-2.5 rounded-lg text-[11px] bg-rose-500/10 text-rose-300 border border-rose-500/20';
+        elements.catalogPdfStatus.innerHTML = `خطأ في فحص الـ PDF: ${err.message || err}`;
+      }
+      showToast(`فشل فحص ملف الـ PDF: ${err.message || err}`, 'error');
+    }
+  }
+
+  function renderDiscoveredChips(items) {
+    if (!elements.catalogDiscoveredChips) return;
+    elements.catalogDiscoveredChips.innerHTML = items.map((item, idx) => `
+      <div class="flex items-center gap-2 bg-slate-900 border border-purple-500/40 px-3 py-1.5 rounded-xl text-xs text-white">
+        <span class="font-semibold">${item.modelName}</span>
+        <button class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-2 py-0.5 rounded text-[11px] transition shadow" onclick="addSingleDiscoveredProduct(${idx})">
+          ➕ إضافة للمسار
+        </button>
+      </div>
+    `).join('');
+  }
+
+  window.addSingleDiscoveredProduct = function(index) {
+    const item = discoveredPdfProducts[index];
+    if (!item) return;
+    const res = ArabicUtils.addProductsToCatalog([item.modelName], true);
+    showToast(`تمت إضافة "${item.modelName}" إلى مسار ممرات المخزن بنجاح!`, 'success');
+    discoveredPdfProducts.splice(index, 1);
+    if (discoveredPdfProducts.length === 0) {
+      if (elements.catalogDiscoveredSection) elements.catalogDiscoveredSection.classList.add('hidden');
+      if (elements.catalogPdfStatus) {
+        elements.catalogPdfStatus.className = 'p-2.5 rounded-lg text-[11px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+        elements.catalogPdfStatus.innerHTML = `✅ تم اعتماد وإضافة كافة الموديلات المكتشفة لمسار المخزن!`;
+      }
+    } else {
+      renderDiscoveredChips(discoveredPdfProducts);
+    }
+    updateCatalogUI();
+    if (state.extractedPages.length > 0) reSortAndRender();
+  };
+
+  if (elements.catalogAddAllDiscoveredBtn) {
+    elements.catalogAddAllDiscoveredBtn.addEventListener('click', () => {
+      if (discoveredPdfProducts.length === 0) return;
+      const names = discoveredPdfProducts.map(p => p.modelName);
+      const res = ArabicUtils.addProductsToCatalog(names, true);
+      showToast(`تمت إضافة ${res.addedCount} موديل جديد إلى مسار ممرات المخزن وحفظها في المتصفح!`, 'success');
+      discoveredPdfProducts = [];
+      if (elements.catalogDiscoveredSection) elements.catalogDiscoveredSection.classList.add('hidden');
+      if (elements.catalogPdfStatus) {
+        elements.catalogPdfStatus.className = 'p-2.5 rounded-lg text-[11px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+        elements.catalogPdfStatus.innerHTML = `✅ تم اعتماد وإضافة كافة الموديلات المكتشفة (${res.addedCount}) لمسار المخزن!`;
+      }
+      updateCatalogUI();
+      if (state.extractedPages.length > 0) reSortAndRender();
+    });
+  }
+
+  // Load Persisted User Preferences (localStorage)
+  function loadPersistedPreferences() {
+    try {
+      const savedWalk = localStorage.getItem('bosta_walk_sequence');
+      if (savedWalk !== null) {
+        state.useWalkSequence = savedWalk === 'true';
+        if (elements.walkSequenceToggle) elements.walkSequenceToggle.checked = state.useWalkSequence;
+        if (elements.panelWalkSequenceToggle) elements.panelWalkSequenceToggle.checked = state.useWalkSequence;
+      }
+
+      const savedPicklists = localStorage.getItem('bosta_enable_picklists');
+      if (savedPicklists !== null) {
+        state.enableBatchPickLists = savedPicklists === 'true';
+        state.insertBlankSeparators = state.enableBatchPickLists;
+        if (elements.batchPicklistsToggle) elements.batchPicklistsToggle.checked = state.enableBatchPickLists;
+        if (elements.panelBatchPicklistsToggle) elements.panelBatchPicklistsToggle.checked = state.enableBatchPickLists;
+      }
+
+      const savedReverseArabic = localStorage.getItem('bosta_reverse_arabic');
+      if (savedReverseArabic !== null && elements.reverseArabicCheckbox) {
+        elements.reverseArabicCheckbox.checked = savedReverseArabic === 'true';
+      }
+
+      const savedResize = localStorage.getItem('bosta_resize_enabled');
+      if (savedResize !== null) {
+        state.resizeEnabled = savedResize === 'true';
+        if (elements.resizeCheckbox) elements.resizeCheckbox.checked = state.resizeEnabled;
+      }
+
+      const savedAspect = localStorage.getItem('bosta_keep_aspect_ratio');
+      if (savedAspect !== null) {
+        state.keepAspectRatio = savedAspect === 'true';
+        if (elements.aspectRatioToggle) elements.aspectRatioToggle.checked = state.keepAspectRatio;
+      }
+
+      const savedWidth = localStorage.getItem('bosta_width_mm');
+      if (savedWidth && elements.widthInput) elements.widthInput.value = savedWidth;
+
+      const savedHeight = localStorage.getItem('bosta_height_mm');
+      if (savedHeight && elements.heightInput) elements.heightInput.value = savedHeight;
+
+      const savedFilename = localStorage.getItem('bosta_custom_filename');
+      if (savedFilename && elements.customFilenameInput) {
+        elements.customFilenameInput.value = savedFilename;
+        elements.customFilenameInput.dataset.userEdited = 'true';
+      }
+    } catch (e) {
+      console.warn('Error loading preferences from localStorage:', e);
+    }
   }
 
   // Expandable panel accordion toggle
@@ -473,6 +1175,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (elements.reverseArabicCheckbox) {
     elements.reverseArabicCheckbox.addEventListener('change', (e) => {
       state.autoFixVisualArabic = e.target.checked;
+      try {
+        localStorage.setItem('bosta_reverse_arabic', String(e.target.checked));
+      } catch (err) {}
       showToast(
         e.target.checked
           ? 'تم تفعيل معالجة النصوص العربية المعكوسة تلقائياً.'
@@ -486,24 +1191,46 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Resize Checkbox change
-  elements.resizeCheckbox.addEventListener('change', (e) => {
-    state.resizeEnabled = e.target.checked;
-    elements.resizeOptionsContainer.classList.toggle('opacity-40', !state.resizeEnabled);
-    elements.resizeOptionsContainer.classList.toggle('pointer-events-none', !state.resizeEnabled);
-  });
+  if (elements.resizeCheckbox) {
+    elements.resizeCheckbox.addEventListener('change', (e) => {
+      state.resizeEnabled = e.target.checked;
+      try {
+        localStorage.setItem('bosta_resize_enabled', String(e.target.checked));
+      } catch (err) {}
+      if (elements.resizeOptionsContainer) {
+        elements.resizeOptionsContainer.classList.toggle('opacity-40', !state.resizeEnabled);
+        elements.resizeOptionsContainer.classList.toggle('pointer-events-none', !state.resizeEnabled);
+      }
+    });
+  }
 
   // Aspect Ratio Toggle
-  elements.aspectRatioToggle.addEventListener('change', (e) => {
-    state.keepAspectRatio = e.target.checked;
-  });
+  if (elements.aspectRatioToggle) {
+    elements.aspectRatioToggle.addEventListener('change', (e) => {
+      state.keepAspectRatio = e.target.checked;
+      try {
+        localStorage.setItem('bosta_keep_aspect_ratio', String(e.target.checked));
+      } catch (err) {}
+    });
+  }
 
   // Width & Height inputs
-  elements.widthInput.addEventListener('change', (e) => {
-    state.widthMm = parseFloat(e.target.value) || 75;
-  });
-  elements.heightInput.addEventListener('change', (e) => {
-    state.heightMm = parseFloat(e.target.value) || 125;
-  });
+  if (elements.widthInput) {
+    elements.widthInput.addEventListener('change', (e) => {
+      state.widthMm = parseFloat(e.target.value) || 75;
+      try {
+        localStorage.setItem('bosta_width_mm', String(state.widthMm));
+      } catch (err) {}
+    });
+  }
+  if (elements.heightInput) {
+    elements.heightInput.addEventListener('change', (e) => {
+      state.heightMm = parseFloat(e.target.value) || 125;
+      try {
+        localStorage.setItem('bosta_height_mm', String(state.heightMm));
+      } catch (err) {}
+    });
+  }
 
   /**
    * Process & Extract PDF
@@ -561,6 +1288,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     state.sortedPages = PDFProcessor.sortPages(state.extractedPages, { useWalkSequence: state.useWalkSequence });
     updateStatistics();
+    updateDefaultFilename();
     renderTable();
     elements.resultsSection.classList.remove('hidden');
     elements.downloadStickyBar.classList.remove('hidden');
@@ -882,6 +1610,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.classList.remove('bg-slate-200', 'dark:bg-slate-800', 'text-slate-700', 'dark:text-slate-300');
 
       state.activeFilter = btn.dataset.filter;
+      updateDefaultFilename();
       renderTable();
     });
   });
@@ -933,6 +1662,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
       await currentCanvasRenderTask.promise;
       currentCanvasRenderTask = null;
+
+      // Feature 1: Stamp sequential label number [ #X ] on modal canvas for shipping labels only
+      if (activeModalItem && (activeModalItem.newPageNumber || activeModalItem.orderIndex)) {
+        const seqNum = activeModalItem.newPageNumber || activeModalItem.orderIndex;
+        const seqText = `[ #${seqNum} ]`;
+        const pt = viewport.convertToViewportPoint(172, 42);
+        const stampW = 28 * viewport.scale;
+        const stampH = 12 * viewport.scale;
+
+        canvasContext.save();
+        canvasContext.fillStyle = '#ffffff';
+        canvasContext.strokeStyle = '#000000';
+        canvasContext.lineWidth = 1 * viewport.scale;
+        const rx = pt[0] - stampW / 2;
+        const ry = pt[1] - stampH / 2;
+        canvasContext.fillRect(rx, ry, stampW, stampH);
+        canvasContext.strokeRect(rx, ry, stampW, stampH);
+        canvasContext.fillStyle = '#000000';
+        canvasContext.font = `bold ${8 * viewport.scale}px monospace`;
+        canvasContext.textAlign = 'center';
+        canvasContext.textBaseline = 'middle';
+        canvasContext.fillText(seqText, pt[0], pt[1]);
+        canvasContext.restore();
+      }
 
       if (elements.modalCanvasLoading) elements.modalCanvasLoading.classList.add('hidden');
       elements.modalPdfCanvas.classList.remove('hidden');
@@ -1191,10 +1944,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Top Download Bar:
   // Red Button: "تحميل كافة البوليصات مرتبة (101 بوليصة)" -> Calls downloadPdfBatch with separator options
   elements.downloadTopBtn.addEventListener('click', async () => {
-    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf', { insertBlankSeparators: state.insertBlankSeparators });
+    const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
+    await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
   });
   elements.downloadStickyBtn.addEventListener('click', async () => {
-    await downloadPdfBatch(state.sortedPages, 'Bosta_All_Sorted.pdf', { insertBlankSeparators: state.insertBlankSeparators });
+    const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
+    await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
   });
 
   // Dynamic Filter Download Button: "تحميل نتائج الفلتر الحالي (X بوليصة)" -> Downloads only currently filtered rows
@@ -1204,14 +1959,15 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast('لا توجد شحنات مطابقة للفلتر الحالي لتصديرها.', 'error');
         return;
       }
-      let filename = 'Bosta_Filtered_Results.pdf';
-      if (state.activeFilter === 'kids') filename = 'قسم_الأطفالي.pdf';
-      else if (state.activeFilter === 'women') filename = 'قسم_الحريمي.pdf';
-      else if (state.activeFilter === 'other') filename = 'قسم_منتجات_أخرى.pdf';
-      else if (state.activeFilter === 'all') filename = 'Bosta_All_Sorted.pdf';
-      else if (state.activeFilter === 'multi') filename = 'أوردرات_متعددة_القطع.pdf';
-      else if (state.activeFilter === 'single') filename = 'أوردرات_قطعة_واحدة.pdf';
+      let defaultName = 'Bosta_Filtered_Results.pdf';
+      if (state.activeFilter === 'kids') defaultName = 'قسم_الأطفالي.pdf';
+      else if (state.activeFilter === 'women') defaultName = 'قسم_الحريمي.pdf';
+      else if (state.activeFilter === 'other') defaultName = 'قسم_منتجات_أخرى.pdf';
+      else if (state.activeFilter === 'all') defaultName = 'Bosta_All_Sorted.pdf';
+      else if (state.activeFilter === 'multi') defaultName = 'أوردرات_متعددة_القطع.pdf';
+      else if (state.activeFilter === 'single') defaultName = 'أوردرات_قطعة_واحدة.pdf';
 
+      const filename = getCustomExportFilename(defaultName);
       await downloadPdfBatch(state.currentFilteredPages, filename);
     });
   }
@@ -1220,28 +1976,32 @@ document.addEventListener('DOMContentLoaded', () => {
   if (elements.downloadKidsBtn) {
     elements.downloadKidsBtn.addEventListener('click', async () => {
       const kids = state.sortedPages.filter(p => p.isKids);
-      await downloadPdfBatch(kids, 'قسم_الأطفالي.pdf', { enableBatchPickLists: false });
+      const filename = getCustomExportFilename('قسم_الأطفالي.pdf');
+      await downloadPdfBatch(kids, filename, { enableBatchPickLists: false });
     });
   }
 
   if (elements.downloadWomenBtn) {
     elements.downloadWomenBtn.addEventListener('click', async () => {
       const women = state.sortedPages.filter(p => p.isWomen);
-      await downloadPdfBatch(women, 'قسم_الحريمي.pdf', { enableBatchPickLists: false });
+      const filename = getCustomExportFilename('قسم_الحريمي.pdf');
+      await downloadPdfBatch(women, filename, { enableBatchPickLists: false });
     });
   }
 
   if (elements.downloadOtherBtn) {
     elements.downloadOtherBtn.addEventListener('click', async () => {
       const other = state.sortedPages.filter(p => p.isOther);
-      await downloadPdfBatch(other, 'قسم_منتجات_أخرى.pdf', { enableBatchPickLists: false });
+      const filename = getCustomExportFilename('قسم_منتجات_أخرى.pdf');
+      await downloadPdfBatch(other, filename, { enableBatchPickLists: false });
     });
   }
 
   if (elements.downloadMultiBtn) {
     elements.downloadMultiBtn.addEventListener('click', async () => {
       const multi = state.sortedPages.filter(p => (p.piecesCount || p.totalItemsCount || 1) >= 2);
-      await downloadPdfBatch(multi, 'أوردرات_متعددة_القطع.pdf', { enableBatchPickLists: false });
+      const filename = getCustomExportFilename('أوردرات_متعددة_القطع.pdf');
+      await downloadPdfBatch(multi, filename, { enableBatchPickLists: false });
     });
   }
 
@@ -1263,6 +2023,10 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.inventoryInput.value = '';
     elements.pdfFileInfo.classList.add('hidden');
     elements.inventoryFileInfo.classList.add('hidden');
+    if (elements.inventoryStatusPill) {
+      elements.inventoryStatusPill.textContent = 'اختياري';
+      elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
+    }
     elements.pdfDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
     elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
     elements.processBtn.disabled = true;
@@ -1275,4 +2039,8 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.resultsSection.classList.add('hidden');
     elements.downloadStickyBar.classList.add('hidden');
   }
+
+  // Initialize dynamic catalog UI and load saved user preferences
+  loadPersistedPreferences();
+  updateCatalogUI();
 });

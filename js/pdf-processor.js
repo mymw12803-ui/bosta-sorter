@@ -10,6 +10,76 @@ const PDFProcessor = {
   // Conversion constant: 1 mm = 2.83464567 PDF points (72 pt / 25.4 mm)
   MM_TO_PT: 2.83464567,
 
+  // Master Warehouse Route Sequence (dynamically synced with ArabicUtils and localStorage)
+  get WAREHOUSE_ROUTE_SEQUENCE() {
+    if (typeof ArabicUtils !== 'undefined' && ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE) {
+      return ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE;
+    }
+    return this._routeSequence || [];
+  },
+  set WAREHOUSE_ROUTE_SEQUENCE(val) {
+    this._routeSequence = val;
+    if (typeof ArabicUtils !== 'undefined') {
+      ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE = val;
+    }
+  },
+
+  // Helper to find the best route index (0 to 49) for any given product
+  getWarehouseRouteRank(productDescription) {
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.getWarehouseRouteRank === 'function') {
+      return ArabicUtils.getWarehouseRouteRank(productDescription);
+    }
+    const norm = (productDescription || "")
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .replace(/\s+/g, "");
+
+    if (!norm) return 999;
+
+    for (let i = 0; i < this.WAREHOUSE_ROUTE_SEQUENCE.length; i++) {
+      const target = this.WAREHOUSE_ROUTE_SEQUENCE[i]
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .replace(/\s+/g, "");
+
+      if (norm.includes(target) || target.includes(norm)) {
+        return i;
+      }
+    }
+
+    const isCarpet = norm.includes("سجاد") || norm.includes("سجاده");
+    if (isCarpet) {
+      if (norm.includes("وتربروف")) return 13;
+      const isKids = norm.includes("اطفال") || norm.includes("اطفالي");
+      return isKids ? 48 : 49;
+    }
+
+    return 999;
+  },
+
+  // Helper to compute route rank for an entire order (minimum route index among its items)
+  getOrderRouteRank(order) {
+    if (!order) return 999;
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.getOrderRouteRank === 'function') {
+      return ArabicUtils.getOrderRouteRank(order);
+    }
+    if (order.products && order.products.length > 0) {
+      const ranks = order.products.map(p => {
+        const desc = p.description || p.formattedLineText || p.rawLineText || p.modelName || '';
+        let r = this.getWarehouseRouteRank(desc);
+        if (r === 999 && p.modelName) {
+          r = this.getWarehouseRouteRank(p.modelName);
+        }
+        return r;
+      });
+      return Math.min(...ranks);
+    }
+    const fallbackDesc = order.description || order.modelName || order.rawDescription || '';
+    return this.getWarehouseRouteRank(fallbackDesc);
+  },
+
   /**
    * Initializes pdf.js worker
    */
@@ -117,6 +187,9 @@ const PDFProcessor = {
         parsed.walkIndex = 999999;
       }
 
+      // Enrich with routeRank from 50 master warehouse sequence
+      parsed.routeRank = typeof parsed.routeRank === 'number' ? parsed.routeRank : this.getOrderRouteRank(parsed);
+
       extractedData.push(parsed);
     }
 
@@ -198,16 +271,21 @@ const PDFProcessor = {
   },
 
   /**
-   * Unified Layered Sorting Pipeline:
-   * - Layer 1 (MANDATORY & PRIMARY): Total Pieces Descending:
-   *     1. Large Orders (3+ pieces, sorted 8, 7, 6, 5, 4, 3...)
-   *     2. Two-Piece Orders (exactly 2 pieces)
-   *     3. Single-Piece Orders (exactly 1 piece)
-   * - Layer 2 (MANDATORY SECONDARY): Department Grouping:
-   *     Women ("حريمي") first -> Kids ("أطفالي") second -> Others third
-   * - Layer 3 (OPTIONAL VIA TOGGLE & UPLOAD): Warehouse CSV Sequence Order:
-   *     Sorted by row index in CSV (walkIndex ascending)
-   * - Sub-layer tie breakers: model, color, size rank, description, page
+   * Strict Multi-Level Sorting Pipeline:
+   * Level 1 (Primary - Mandatory): Total Pieces Count Descending:
+   *   Group A: Large Orders (3+ pieces: 8, 7, 6, 5, 4, 3...).
+   *   Group B: Two-Piece Orders (2 قطع).
+   *   Group C: Single-Piece Orders (1 قطعة) placed strictly at the end.
+   *   if (b.totalPieces !== a.totalPieces) return b.totalPieces - a.totalPieces;
+   *
+   * Level 2 (Secondary): Master Route Sequence (0 to 49):
+   *   For single-piece orders: sort strictly by getWarehouseRouteRank(order.products[0].description).
+   *   For multi-piece orders: compute minimum route index among order's items
+   *     Math.min(...order.products.map(p => getWarehouseRouteRank(p.description)))
+   *     so order is picked at earliest aisle encounter, followed by model/color/size tie-breakers.
+   *
+   * Level 3 (Optional): If an Inventory CSV/SKU sheet is uploaded:
+   *   Use uploaded CSV's row sequence as tie-breaker within identical route ranks.
    */
   sortPages(pages, options = {}) {
     const list = [...pages];
@@ -219,6 +297,16 @@ const PDFProcessor = {
     }
     const useWalkSequence = opts.useWalkSequence !== false;
 
+    // Pre-calculate pieces count and routeRank for stability
+    for (const item of list) {
+      const count = typeof item.totalPieces === 'number'
+        ? item.totalPieces
+        : (item.piecesCount || item.totalItemsCount || parseInt(item.totalPieces, 10) || 1);
+      item.piecesCount = count;
+      item.totalPieces = count;
+      item.routeRank = typeof item.routeRank === 'number' ? item.routeRank : this.getOrderRouteRank(item);
+    }
+
     list.sort((a, b) => {
       // Unrecognized/empty pages are pushed to the end
       if (!a.hasRecognizedDescription && b.hasRecognizedDescription) return 1;
@@ -227,24 +315,25 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Layer 1: Total Pieces Group (Large 3+ -> Two-Piece 2 -> Single 1)
-      const gA = this.getPieceGroup(a);
-      const gB = this.getPieceGroup(b);
-      if (gA !== gB) return gA - gB;
-
-      // Within Group 1 (Large orders, 3+ pieces): Pieces descending (8, 7, 6, 5, 4, 3...)
-      if (gA === 1) {
-        const countA = a.piecesCount || a.totalItemsCount || 1;
-        const countB = b.piecesCount || b.totalItemsCount || 1;
-        if (countB !== countA) return countB - countA;
+      // Level 1 (Primary - Mandatory): Total Pieces Count Descending
+      // Group A (3+ pieces descending: 8, 7, 6, 5, 4, 3...) -> Group B (2 pieces) -> Group C (1 piece)
+      const countA = a.piecesCount || 1;
+      const countB = b.piecesCount || 1;
+      if (countB !== countA) {
+        return countB - countA;
       }
 
-      // Layer 2: Department Grouping: Women (1) -> Kids (2) -> Others (3)
-      const deptA = this.getDeptRank(a);
-      const deptB = this.getDeptRank(b);
-      if (deptA !== deptB) return deptA - deptB;
+      // Level 2 (Secondary): Master Route Sequence (0 to 49)
+      // Single-piece: route rank of product (0 to 49)
+      // Multi-piece: minimum route rank among order items (earliest aisle encounter)
+      const rankA = typeof a.routeRank === 'number' ? a.routeRank : 999;
+      const rankB = typeof b.routeRank === 'number' ? b.routeRank : 999;
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
 
-      // Layer 3: Warehouse CSV Sequence Order (if enabled)
+      // Level 3 (Optional): If an Inventory CSV/SKU sheet is uploaded:
+      // Use uploaded CSV row sequence as tie-breaker within identical route ranks
       if (useWalkSequence) {
         const walkA = typeof a.walkIndex === 'number' ? a.walkIndex : 999999;
         const walkB = typeof b.walkIndex === 'number' ? b.walkIndex : 999999;
@@ -253,20 +342,26 @@ const PDFProcessor = {
 
       // Tie Breakers:
       // Model Name
-      const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
+      const modelA = a.normalizedModel || a.modelName || '';
+      const modelB = b.normalizedModel || b.modelName || '';
+      const modelCmp = arCollator.compare(modelA, modelB);
       if (modelCmp !== 0) return modelCmp;
 
       // Color / Variant Code
-      const colorCmp = arCollator.compare(a.normalizedColor || '', b.normalizedColor || '');
+      const colorA = a.normalizedColor || a.color || '';
+      const colorB = b.normalizedColor || b.color || '';
+      const colorCmp = arCollator.compare(colorA, colorB);
       if (colorCmp !== 0) return colorCmp;
 
       // Size Rank: الأول -> الثاني -> الثالث -> الرابع
-      const sizeA = ArabicUtils.getSizeRank(a.normalizedSize);
-      const sizeB = ArabicUtils.getSizeRank(b.normalizedSize);
+      const sizeA = ArabicUtils.getSizeRank(a.normalizedSize || a.size);
+      const sizeB = ArabicUtils.getSizeRank(b.normalizedSize || b.size);
       if (sizeA !== sizeB) return sizeA - sizeB;
 
       // Full Description Tie-Breaker
-      const descCmp = arCollator.compare(a.fullNormalizedDesc || '', b.fullNormalizedDesc || '');
+      const descA = a.fullNormalizedDesc || a.rawDescription || '';
+      const descB = b.fullNormalizedDesc || b.rawDescription || '';
+      const descCmp = arCollator.compare(descA, descB);
       if (descCmp !== 0) return descCmp;
 
       return a.originalPageNumber - b.originalPageNumber;
@@ -279,15 +374,65 @@ const PDFProcessor = {
   },
 
   /**
-   * Generates a pick list sheet (75mm x 125mm = 212.60 x 354.33 pt)
-   * Clean high-contrast table or list with header:
-   * 📦 بطاقة تجهيز المخزن | دفعة [X] قطعة | [Y] أوردرات
-   * Columns/Rows: [ ] | اسم الموديل واللون والمقاس | كود SKU | الكمية
+   * Stamps a clean, small sequential reference box onto shipping labels ONLY.
+   * Placement: bottom notes area around x = 160..185, y = 35..55
+   * Sized ~26-32 pt x 12 pt with HelveticaBold font size 7.5 pt.
+   * NEVER called on blank separator pages or batch pick-list sheets.
+   */
+  stampLabelSequenceNumber(page, seqNumber, font) {
+    if (!page || !seqNumber || !font) return;
+    const { width } = page.getSize();
+    const numText = `[ #${seqNumber} ]`;
+    const fontSize = 7.5;
+    const textWidth = font.widthOfTextAtSize(numText, fontSize);
+
+    // Box dimensions
+    const boxWidth = Math.max(26, textWidth + 6);
+    const boxHeight = 12;
+
+    // Coordinate calculation: within x = 160..185, y = 35..55
+    const x = Math.min(width - boxWidth - 10, Math.max(160, width - boxWidth - 14));
+    const y = 42;
+
+    const { rgb } = (typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null));
+
+    // Solid white background box with crisp black border
+    page.drawRectangle({
+      x,
+      y,
+      width: boxWidth,
+      height: boxHeight,
+      color: rgb(1, 1, 1),
+      borderColor: rgb(0, 0, 0),
+      borderWidth: 1
+    });
+
+    // Centered bold text
+    const textX = x + (boxWidth - textWidth) / 2;
+    const textY = y + (boxHeight - fontSize) / 2 + 1;
+
+    page.drawText(numText, {
+      x: textX,
+      y: textY,
+      size: fontSize,
+      font,
+      color: rgb(0, 0, 0)
+    });
+  },
+
+  /**
+   * Generates an enhanced batch pick list sheet (75mm x 125mm = 212.60 x 354.33 pt)
+   * 1. Header Attribution: 📦 بطاقة تجهيز المخزن (تابعة للبوالص السابقة ⬆️) | من بوليصة [#Start] إلى [#End]
+   * 2. Body Items Checklist: Model + Color + Size + Total QTY with [ ] checkbox
+   * 3. Bottom Orders Breakdown Box: #, Order Ref, AWB, Qty cross-verification table
    */
   async createPickListSheet(outDoc, batch, batchType = 'large') {
     const totalOrders = batch.length;
     let totalPieces = 0;
     const itemMap = new Map();
+
+    const startNum = (batch[0] && batch[0].newPageNumber) ? batch[0].newPageNumber : 1;
+    const endNum = (batch[batch.length - 1] && batch[batch.length - 1].newPageNumber) ? batch[batch.length - 1].newPageNumber : batch.length;
 
     for (const order of batch) {
       const orderPieces = order.piecesCount || order.totalItemsCount || (order.products ? order.products.reduce((a, b) => a + (b.qty || 1), 0) : 1);
@@ -305,12 +450,23 @@ const PDFProcessor = {
           }];
 
       for (const it of items) {
-        const itemSku = it.sku || order.sku || '';
+        let itemSku = it.sku || order.sku || '';
         const model = it.modelName || order.modelName || 'صنف غير محدد';
         const color = it.color || '';
         const colorCode = it.colorCode || '';
         const size = it.size || '';
         const qty = it.qty || 1;
+
+        if (!itemSku && typeof InventoryParser !== 'undefined') {
+          const match = InventoryParser.matchProduct({
+            modelName: model,
+            color: color,
+            size: size
+          });
+          if (match && match.sku) {
+            itemSku = match.sku;
+          }
+        }
 
         const key = itemSku ? itemSku : `${model}|${color}|${size}`;
 
@@ -352,11 +508,10 @@ const PDFProcessor = {
       }
     }
 
-    const aggregatedItems = Array.from(itemMap.values()).sort((a, b) => a.walkIndex - b.walkIndex);
-
-    const titleSubtitle = batchType === 'large'
-      ? `بطاقة تجميع الأوردرات الكبرى (دفعة ${totalPieces} قطعة)`
-      : `بطاقة تجميع أوردرات القطعتين (دفعة ${totalPieces} قطعة)`;
+    const aggregatedItems = Array.from(itemMap.values()).sort((a, b) => {
+      if (a.walkIndex !== b.walkIndex) return a.walkIndex - b.walkIndex;
+      return (a.name || '').localeCompare(b.name || '', 'ar');
+    });
 
     // Check if running in browser with canvas support
     if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
@@ -365,153 +520,238 @@ const PDFProcessor = {
       canvas.height = 1476;
       const ctx = canvas.getContext('2d');
 
-      // Background
+      // Crisp pure white background for thermal printer
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Outer heavy border
-      ctx.strokeStyle = '#0f172a';
+      // Outer heavy border (pure black for thermal contrast)
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 6;
       ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
 
-      // Header Banner (Dark slate, height 160px)
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(6, 6, canvas.width - 12, 160);
+      // 1. Header Banner (Solid black, height 135px)
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(6, 6, canvas.width - 12, 135);
 
-      // Header Title
+      // Line 1: Header Attribution
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'center';
-      ctx.font = 'bold 36px "Alexandria", "Cairo", sans-serif';
-      ctx.fillText('📦 بطاقة تجهيز المخزن', canvas.width / 2, 60);
+      ctx.font = 'bold 27px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText('📦 بطاقة تجهيز المخزن (تابعة للبوالص السابقة ⬆️)', canvas.width / 2, 44);
 
-      // Header Meta
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 28px "Alexandria", "Cairo", sans-serif';
-      ctx.fillText(`دفعة [ ${totalPieces} ] قطعة  |  [ ${totalOrders} ] أوردرات`, canvas.width / 2, 115);
+      // Line 2: Batch Summary Range
+      ctx.fillStyle = '#fde047';
+      ctx.font = 'bold 23px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText(`الدفعة: من بوليصة [ #${startNum} ] إلى [ #${endNum} ]`, canvas.width / 2, 84);
 
-      // Subtitle banner (height 55px)
-      ctx.fillStyle = '#f1f5f9';
-      ctx.fillRect(6, 166, canvas.width - 12, 55);
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(6, 166, canvas.width - 12, 55);
-
-      ctx.fillStyle = '#1e293b';
-      ctx.font = 'bold 24px "Alexandria", "Cairo", sans-serif';
-      ctx.fillText(titleSubtitle, canvas.width / 2, 203);
-
-      // Table Header (height 48px)
-      const tableTop = 225;
-      ctx.fillStyle = '#e2e8f0';
-      ctx.fillRect(6, tableTop, canvas.width - 12, 48);
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(6, tableTop, canvas.width - 12, 48);
-
-      ctx.fillStyle = '#0f172a';
+      // Line 3: Meta
+      ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 20px "Alexandria", "Cairo", sans-serif';
-      ctx.fillText('تم', 840, tableTop + 32);
-      ctx.fillText('اسم الموديل واللون والمقاس', 540, tableTop + 32);
-      ctx.fillText('كود SKU', 200, tableTop + 32);
-      ctx.fillText('الكمية', 65, tableTop + 32);
+      ctx.fillText(`إجمالي: ${totalPieces} قطعة  |  ${totalOrders} أوردرات`, canvas.width / 2, 118);
 
-      // Rows
-      let currentY = tableTop + 48;
-      const availableHeight = canvas.height - currentY - 80;
+      // Subtitle banner for items list (height 36px)
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(6, 143, canvas.width - 12, 36);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(6, 143, canvas.width - 12, 36);
+
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 18px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText('📋 قائمة الأصناف المجمعة للالتقاط (Pick List Checklist):', canvas.width / 2, 167);
+
+      // Calculate Bottom Orders Table dimensions
+      const orderRowHeight = 28;
+      const bottomTableRowsHeight = Math.min(batch.length, 10) * orderRowHeight;
+      const bottomTableTotalHeight = 34 + 30 + bottomTableRowsHeight + 40;
+      const bottomSectionY = canvas.height - bottomTableTotalHeight - 6;
+
+      // 2. Items Table Header (height 38px)
+      const itemsHeaderY = 182;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(6, itemsHeaderY, canvas.width - 12, 38);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 18px "Alexandria", "Cairo", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('[ ]', 840, itemsHeaderY + 26);
+      ctx.fillText('اسم الموديل واللون والمقاس', 530, itemsHeaderY + 26);
+      ctx.fillText('كود SKU', 200, itemsHeaderY + 26);
+      ctx.fillText('الكمية', 65, itemsHeaderY + 26);
+
+      // Available height for items rows
+      const itemsStartY = itemsHeaderY + 38;
+      const availableItemsHeight = bottomSectionY - 10 - itemsStartY;
       const rowCount = Math.max(aggregatedItems.length, 1);
-      const rowHeight = Math.min(68, Math.max(42, Math.floor(availableHeight / rowCount)));
+      const itemRowHeight = Math.min(50, Math.max(28, Math.floor(availableItemsHeight / rowCount)));
 
+      let curItemY = itemsStartY;
       for (let idx = 0; idx < aggregatedItems.length; idx++) {
+        if (curItemY + itemRowHeight > bottomSectionY - 6) break;
         const it = aggregatedItems[idx];
         const isEven = idx % 2 === 0;
 
         ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
-        ctx.fillRect(6, currentY, canvas.width - 12, rowHeight);
+        ctx.fillRect(6, curItemY, canvas.width - 12, itemRowHeight);
 
-        ctx.strokeStyle = '#e2e8f0';
+        // Dividing line
+        ctx.strokeStyle = '#cbd5e1';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(6, currentY + rowHeight);
-        ctx.lineTo(canvas.width - 6, currentY + rowHeight);
+        ctx.moveTo(6, curItemY + itemRowHeight);
+        ctx.lineTo(canvas.width - 6, curItemY + itemRowHeight);
         ctx.stroke();
 
-        // Checkbox in Col 1
-        const boxSize = Math.min(28, rowHeight - 16);
-        const boxY = currentY + (rowHeight - boxSize) / 2;
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(825, boxY, boxSize, boxSize);
+        // Col 1: Small square checkbox
+        const boxSize = Math.min(24, Math.max(16, itemRowHeight - 10));
+        const boxY = curItemY + (itemRowHeight - boxSize) / 2;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(827, boxY, boxSize, boxSize);
 
         // Col 2: Name
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = '#000000';
         ctx.textAlign = 'right';
-        ctx.font = `bold ${rowHeight < 50 ? 18 : 22}px "Alexandria", "Cairo", sans-serif`;
+        const fontSize = itemRowHeight >= 45 ? 18 : (itemRowHeight >= 36 ? 16 : 13);
+        ctx.font = `bold ${fontSize}px "Alexandria", "Cairo", sans-serif`;
         let displayName = it.name || '';
-        if (displayName.length > 38) {
-          displayName = displayName.substring(0, 36) + '...';
+        if (displayName.length > 35) {
+          displayName = displayName.substring(0, 33) + '...';
         }
-        ctx.fillText(displayName, 795, currentY + rowHeight * 0.65);
+        ctx.fillText(displayName, 800, curItemY + itemRowHeight * 0.65);
 
         // Col 3: SKU Pill
         if (it.sku) {
           const pillW = 140;
-          const pillH = Math.min(30, rowHeight - 12);
+          const pillH = Math.min(28, Math.max(20, itemRowHeight - 8));
           const pillX = 130;
-          const pillY = currentY + (rowHeight - pillH) / 2;
+          const pillY = curItemY + (itemRowHeight - pillH) / 2;
 
-          ctx.fillStyle = '#f1f5f9';
+          ctx.fillStyle = '#ffffff';
           ctx.beginPath();
-          ctx.roundRect(pillX, pillY, pillW, pillH, 6);
+          ctx.roundRect(pillX, pillY, pillW, pillH, 4);
           ctx.fill();
-          ctx.strokeStyle = '#cbd5e1';
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 2;
           ctx.stroke();
 
-          ctx.fillStyle = '#0284c7';
+          ctx.fillStyle = '#000000';
           ctx.textAlign = 'center';
-          ctx.font = `bold ${rowHeight < 50 ? 16 : 19}px monospace`;
+          const skuFontSize = itemRowHeight >= 40 ? 15 : 12;
+          ctx.font = `bold ${skuFontSize}px monospace`;
           ctx.fillText(it.sku, pillX + pillW / 2, pillY + pillH * 0.72);
         } else {
-          ctx.fillStyle = '#94a3b8';
+          ctx.fillStyle = '#64748b';
           ctx.textAlign = 'center';
-          ctx.font = 'italic 16px "Alexandria", "Cairo", sans-serif';
-          ctx.fillText('-', 200, currentY + rowHeight * 0.65);
+          ctx.font = 'bold 15px monospace';
+          ctx.fillText('-', 200, curItemY + itemRowHeight * 0.65);
         }
 
-        // Col 4: Qty badge
-        const qtyW = 60;
-        const qtyH = Math.min(34, rowHeight - 10);
-        const qtyX = 35;
-        const qtyY = currentY + (rowHeight - qtyH) / 2;
+        // Col 4: Qty
+        const qtyW = 55;
+        const qtyH = Math.min(30, Math.max(22, itemRowHeight - 6));
+        const qtyX = 38;
+        const qtyY = curItemY + (itemRowHeight - qtyH) / 2;
 
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = '#000000';
         ctx.beginPath();
-        ctx.roundRect(qtyX, qtyY, qtyW, qtyH, 6);
+        ctx.roundRect(qtyX, qtyY, qtyW, qtyH, 4);
         ctx.fill();
 
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
-        ctx.font = `bold ${rowHeight < 50 ? 20 : 24}px sans-serif`;
-        ctx.fillText(`${it.qty}`, qtyX + qtyW / 2, qtyY + qtyH * 0.75);
+        const qtyFontSize = itemRowHeight >= 40 ? 19 : 15;
+        ctx.font = `bold ${qtyFontSize}px sans-serif`;
+        ctx.fillText(`${it.qty}`, qtyX + qtyW / 2, qtyY + qtyH * 0.74);
 
-        currentY += rowHeight;
+        curItemY += itemRowHeight;
       }
 
-      // Footer
-      const footerY = canvas.height - 55;
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(6, footerY, canvas.width - 12, 48);
-      ctx.strokeStyle = '#e2e8f0';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(6, footerY);
-      ctx.lineTo(canvas.width - 6, footerY);
-      ctx.stroke();
+      // 3. Bottom Orders Breakdown Box (جدول مطابقة الأوردرات بالأسفل)
+      let curBottomY = bottomSectionY;
 
-      ctx.fillStyle = '#475569';
+      // Section Title Banner
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(6, curBottomY, canvas.width - 12, 34);
+      ctx.fillStyle = '#fde047';
+      ctx.font = 'bold 17px "Alexandria", "Cairo", sans-serif';
       ctx.textAlign = 'center';
-      ctx.font = 'bold 20px "Alexandria", "Cairo", sans-serif';
-      ctx.fillText(`إجمالي الأصناف: ${aggregatedItems.length} صنف | إجمالي القطع: ${totalPieces} قطعة | مرتبة بمسار الممرات`, canvas.width / 2, footerY + 32);
+      ctx.fillText(`📋 جدول مطابقة بوالص الدفعة (${totalOrders} أوردرات من [#${startNum}] إلى [#${endNum}])`, canvas.width / 2, curBottomY + 23);
+
+      curBottomY += 34;
+
+      // Bottom Table Header (30px)
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(6, curBottomY, canvas.width - 12, 30);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 15px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText('التسلسل (#)', 795, curBottomY + 20);
+      ctx.fillText('كود الأوردر (Order Ref)', 565, curBottomY + 20);
+      ctx.fillText('رقم البوليصة (AWB)', 305, curBottomY + 20);
+      ctx.fillText('القطع (Qty)', 75, curBottomY + 20);
+
+      curBottomY += 30;
+
+      // Bottom Table Rows for each order in this batch
+      for (let bIdx = 0; bIdx < batch.length; bIdx++) {
+        if (bIdx >= 10) break; // Keep inside printable bounds
+        const ord = batch[bIdx];
+        const isOrdEven = bIdx % 2 === 0;
+
+        ctx.fillStyle = isOrdEven ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(6, curBottomY, canvas.width - 12, orderRowHeight);
+
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(6, curBottomY + orderRowHeight);
+        ctx.lineTo(canvas.width - 6, curBottomY + orderRowHeight);
+        ctx.stroke();
+
+        const ordSeq = ord.newPageNumber || (bIdx + 1);
+        const ordRef = ord.orderReference || ord.trackingNumber || '-';
+        const ordAwb = ord.trackingNumber || '-';
+        const ordQty = ord.piecesCount || ord.totalItemsCount || (ord.products ? ord.products.reduce((a, b) => a + (b.qty || 1), 0) : 1);
+
+        // Col 1: Sequence #
+        ctx.fillStyle = '#0284c7';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 15px monospace';
+        ctx.fillText(`[ #${ordSeq} ]`, 795, curBottomY + 19);
+
+        // Col 2: Order Ref
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+        let refStr = String(ordRef);
+        if (refStr.length > 20) refStr = refStr.substring(0, 18) + '...';
+        ctx.fillText(refStr, 565, curBottomY + 19);
+
+        // Col 3: AWB
+        ctx.fillStyle = '#334155';
+        ctx.font = 'bold 13px monospace';
+        let awbStr = String(ordAwb);
+        if (awbStr.length > 20) awbStr = awbStr.substring(0, 18) + '...';
+        ctx.fillText(awbStr, 305, curBottomY + 19);
+
+        // Col 4: Qty
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText(`${ordQty} ق`, 75, curBottomY + 19);
+
+        curBottomY += orderRowHeight;
+      }
+
+      // Footer Banner
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(6, curBottomY, canvas.width - 12, 38);
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(6, curBottomY, canvas.width - 12, 38);
+
+      ctx.fillStyle = '#000000';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 15px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText(`تأكد من مطابقة أرقام البوالص [#${startNum}] إلى [#${endNum}] مع البوالص السابقة لهذه البطاقة ⬆️`, canvas.width / 2, curBottomY + 24);
 
       const dataUrl = canvas.toDataURL('image/png');
       const pngImage = await outDoc.embedPng(dataUrl);
@@ -536,7 +776,7 @@ const PDFProcessor = {
         width: 204.6,
         height: 346.33,
         borderWidth: 2,
-        borderColor: rgb(0.1, 0.1, 0.2),
+        borderColor: rgb(0, 0, 0),
         color: rgb(1, 1, 1)
       });
 
@@ -545,23 +785,23 @@ const PDFProcessor = {
         y: 354.33 - 45,
         width: 204.6,
         height: 41,
-        color: rgb(0.06, 0.09, 0.16)
+        color: rgb(0, 0, 0)
       });
 
-      page.drawText('WAREHOUSE PICK LIST', {
-        x: 35,
+      page.drawText(`PICK LIST (PREVIOUS LABELS ^) | [#${startNum}] TO [#${endNum}]`, {
+        x: 10,
         y: 354.33 - 22,
-        size: 11,
+        size: 8,
         font: font,
         color: rgb(1, 1, 1)
       });
 
       page.drawText(`BATCH: ${totalPieces} PCS | ${totalOrders} ORDERS`, {
-        x: 30,
-        y: 354.33 - 38,
-        size: 9,
+        x: 10,
+        y: 354.33 - 36,
+        size: 8,
         font: font,
-        color: rgb(0.2, 0.7, 0.9)
+        color: rgb(0.9, 0.8, 0.2)
       });
 
       page.drawRectangle({
@@ -569,29 +809,80 @@ const PDFProcessor = {
         y: 354.33 - 62,
         width: 204.6,
         height: 16,
-        color: rgb(0.9, 0.92, 0.95)
+        color: rgb(0.9, 0.9, 0.9)
       });
 
-      page.drawText('[ ] ITEM / SKU', { x: 10, y: 354.33 - 57, size: 7, font: font, color: rgb(0.1, 0.1, 0.2) });
-      page.drawText('QTY', { x: 185, y: 354.33 - 57, size: 7, font: font, color: rgb(0.1, 0.1, 0.2) });
+      page.drawText('[ ]', { x: 10, y: 354.33 - 57, size: 7, font: font, color: rgb(0, 0, 0) });
+      page.drawText('ITEM / SKU', { x: 30, y: 354.33 - 57, size: 7, font: font, color: rgb(0, 0, 0) });
+      page.drawText('QTY', { x: 185, y: 354.33 - 57, size: 7, font: font, color: rgb(0, 0, 0) });
 
       let curY = 354.33 - 78;
       for (const it of aggregatedItems) {
-        if (curY < 30) break;
+        if (curY < 130) break;
         page.drawRectangle({
           x: 10,
           y: curY,
           width: 8,
           height: 8,
           borderWidth: 1,
-          borderColor: rgb(0.1, 0.1, 0.1)
+          borderColor: rgb(0, 0, 0)
         });
 
-        const label = it.sku ? `SKU: ${it.sku}` : `Item #${aggregatedItems.indexOf(it) + 1} (Walk: ${it.walkIndex})`;
-        page.drawText(label, { x: 23, y: curY + 1, size: 7, font: regFont, color: rgb(0.1, 0.1, 0.2) });
-        page.drawText(`x${it.qty}`, { x: 185, y: curY + 1, size: 8, font: font, color: rgb(0.1, 0.1, 0.2) });
+        const label = it.sku ? `SKU: ${it.sku}` : `Item #${aggregatedItems.indexOf(it) + 1}`;
+        page.drawText(label, { x: 23, y: curY + 1, size: 7, font: regFont, color: rgb(0, 0, 0) });
+        page.drawText(`x${it.qty}`, { x: 185, y: curY + 1, size: 8, font: font, color: rgb(0, 0, 0) });
 
         curY -= 14;
+      }
+
+      // Bottom Orders Breakdown Table in Node fallback
+      page.drawRectangle({
+        x: 4,
+        y: 115,
+        width: 204.6,
+        height: 14,
+        color: rgb(0.08, 0.1, 0.15)
+      });
+      page.drawText(`BATCH ORDERS CHECK: [#${startNum}] TO [#${endNum}]`, {
+        x: 10,
+        y: 119,
+        size: 7,
+        font: font,
+        color: rgb(1, 1, 1)
+      });
+
+      page.drawRectangle({
+        x: 4,
+        y: 101,
+        width: 204.6,
+        height: 14,
+        color: rgb(0.9, 0.9, 0.9)
+      });
+      page.drawText('# | ORDER REF | AWB | QTY', {
+        x: 10,
+        y: 105,
+        size: 6.5,
+        font: font,
+        color: rgb(0, 0, 0)
+      });
+
+      let ordY = 89;
+      for (let bIdx = 0; bIdx < batch.length; bIdx++) {
+        if (ordY < 20 || bIdx >= 8) break;
+        const ord = batch[bIdx];
+        const ref = ord.orderReference || ord.trackingNumber || '-';
+        const awb = ord.trackingNumber || '-';
+        const pCount = ord.piecesCount || ord.totalItemsCount || 1;
+        const seq = ord.newPageNumber || (bIdx + 1);
+
+        page.drawText(`#${seq} | ${ref} | ${awb} | ${pCount} PCS`, {
+          x: 10,
+          y: ordY,
+          size: 6.5,
+          font: regFont,
+          color: rgb(0.1, 0.1, 0.1)
+        });
+        ordY -= 11;
       }
 
       return page;
@@ -603,7 +894,10 @@ const PDFProcessor = {
    * Auto-Batching Pick Lists & Blank Separators:
    * 1. Large orders (3+ pieces): Batched <= 30 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
    * 2. Two-piece orders (2 pieces): Batched <= 10 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
-   * 3. Single-piece orders (1 piece): NO pick lists. Department separation only (Women vs Kids vs Others) with blank separator
+   * 3. Single-piece orders (1 piece): NO pick lists and NO blank separators inside!
+   * Stamping Rule:
+   * Stamps small sequential reference box [ #1 ], [ #2 ] onto shipping labels ONLY!
+   * NEVER stamps on blank separators or batch pick-list sheets.
    */
   async generateSortedPDF(masterPdfBytes, sortedPages, options = {}, onProgress) {
     const pdfLibModule = typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null);
@@ -627,8 +921,11 @@ const PDFProcessor = {
       const srcDoc = await pdfLibModule.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
       const outDoc = await pdfLibModule.PDFDocument.create();
 
+      // Embed standard font for sequential label stamping
+      const stampFont = await outDoc.embedFont(pdfLibModule.StandardFonts.HelveticaBold);
+
       if (!enableBatchPickLists) {
-        // Simple direct 1:1 binary copy without batch pick lists or separators
+        // Simple direct 1:1 binary copy with sequential stamping on shipping labels
         const sortedIndices = sortedPages.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
         const copiedPages = await outDoc.copyPages(srcDoc, sortedIndices);
         for (let i = 0; i < copiedPages.length; i++) {
@@ -637,10 +934,17 @@ const PDFProcessor = {
               current: i + 1,
               total: copiedPages.length,
               percent: Math.round(((i + 1) / copiedPages.length) * 100),
-              phase: 'تجهيز صفحات الطباعة (نسخ ثنائي مباشر 1:1)'
+              phase: 'تجهيز صفحات الطباعة (ترقيم البوالص ونسخ ثنائي 1:1)'
             });
           }
-          outDoc.addPage(copiedPages[i]);
+          const cp = copiedPages[i];
+          const order = sortedPages[i];
+          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (i + 1);
+
+          // Stamp sequence number box onto shipping labels ONLY
+          this.stampLabelSequenceNumber(cp, seqNum, stampFont);
+
+          outDoc.addPage(cp);
         }
         return await outDoc.save();
       }
@@ -648,33 +952,37 @@ const PDFProcessor = {
       // Partition sorted pages into groups
       const largeOrders = [];
       const twoPieceOrders = [];
-      const singleWomen = [];
-      const singleKids = [];
-      const singleOthers = [];
+      const singleOrders = [];
       const unrecognizedOrders = [];
 
       for (const p of sortedPages) {
-        const group = this.getPieceGroup(p);
-        if (group === 1) {
-          largeOrders.push(p);
-        } else if (group === 2) {
-          twoPieceOrders.push(p);
-        } else if (group === 3) {
-          const dept = this.getDeptRank(p);
-          if (dept === 1) singleWomen.push(p);
-          else if (dept === 2) singleKids.push(p);
-          else singleOthers.push(p);
-        } else {
+        if (p.hasRecognizedDescription === false) {
           unrecognizedOrders.push(p);
+          continue;
+        }
+        const count = typeof p.piecesCount === 'number' ? p.piecesCount : (parseInt(p.totalPieces, 10) || 1);
+        if (count >= 3) {
+          largeOrders.push(p);
+        } else if (count === 2) {
+          twoPieceOrders.push(p);
+        } else {
+          singleOrders.push(p);
         }
       }
 
-      // Helper to copy and add orders in an array
+      // Helper to copy and add orders in an array with sequential label stamp
       const addOrderLabels = async (ordersList) => {
         if (!ordersList || ordersList.length === 0) return;
         const indices = ordersList.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
         const copied = await outDoc.copyPages(srcDoc, indices);
-        for (const cp of copied) {
+        for (let i = 0; i < copied.length; i++) {
+          const cp = copied[i];
+          const order = ordersList[i];
+          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (i + 1);
+
+          // Stamp sequence number box onto shipping labels ONLY
+          this.stampLabelSequenceNumber(cp, seqNum, stampFont);
+
           outDoc.addPage(cp);
         }
       };
@@ -735,27 +1043,25 @@ const PDFProcessor = {
         }
       }
 
-      // 3. Single-Piece Orders (1 piece): NO pick lists! Separate departments with blank separator
-      let hasPrecedingSingleGroup = false;
+      // 3. Single-Piece Orders (1 piece):
+      // No batch pick-lists. Maintain sequential route order from #1 (تلبيسه اطفالي) to #50 (سجاد حريمي).
+      // Insert a blank separator page between major sections (before prayer rugs / carpets: rank >= 48).
+      if (singleOrders.length > 0) {
+        let carpetSeparatorInserted = false;
+        let nonCarpetPrinted = false;
 
-      if (singleWomen.length > 0) {
-        await addOrderLabels(singleWomen);
-        hasPrecedingSingleGroup = true;
-      }
-
-      if (singleKids.length > 0) {
-        if (hasPrecedingSingleGroup) {
-          outDoc.addPage([212.60, 354.33]); // Blank separator between Women and Kids
+        for (const order of singleOrders) {
+          const rank = typeof order.routeRank === 'number' ? order.routeRank : this.getOrderRouteRank(order);
+          // Insert a 100% blank separator page before entering carpets/prayer rugs (ranks 48 and 49)
+          if (!carpetSeparatorInserted && rank >= 48 && nonCarpetPrinted) {
+            outDoc.addPage([212.60, 354.33]);
+            carpetSeparatorInserted = true;
+          }
+          if (rank < 48) {
+            nonCarpetPrinted = true;
+          }
+          await addOrderLabels([order]);
         }
-        await addOrderLabels(singleKids);
-        hasPrecedingSingleGroup = true;
-      }
-
-      if (singleOthers.length > 0) {
-        if (hasPrecedingSingleGroup) {
-          outDoc.addPage([212.60, 354.33]); // Blank separator between (Women/Kids) and Others
-        }
-        await addOrderLabels(singleOthers);
       }
 
       // 4. Unrecognized Orders (if any)

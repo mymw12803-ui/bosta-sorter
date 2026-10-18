@@ -7,6 +7,84 @@
 
 const ArabicUtils = {
   // Built-in Warehouse Master Catalog (55 official products from Shopify inventory)
+  // Built-in Warehouse Master Catalog Defaults (55 official products from Shopify inventory)
+  DEFAULT_WAREHOUSE_TITLES: [
+    "اسدال رقة اطفالي", "اسدال رقة حريمي", "اسدال مشجر اطفالي", "جيبة بطانة",
+    "خمار مشجر بأكمام", "ملحفة صلاة مشجرة", "ملحفه جيب وتر بروف", "توتي باج",
+    "اسدال بخمار أطفالي مشجر", "اسدال زهرة", "طقم صلاه فسكوز حريمي", "اسدال عباية",
+    "خمار بدون اكمام سادة", "سجادة صلاة اطفالي صغيرة", "خمار بيليسيه اطفالي",
+    "خمار بيليسيه حريمي", "اسدال بخمار حريمي مشجر", "خمار مشجر بدون اكمام",
+    "اسدال مشجر", "جيبه صلاه فيسكوز", "خمار زبدة", "سجادة الهدي قطيفة",
+    "اسدال فراشة", "اسدال بكشكشة", "ملحفه صلاه سادة", "اسدال فسكوز مشجر",
+    "سجادة صلاة قطيفة مطبوعة", "سجادة صلاة اطفالي قطيفة", "اسدال بجيوب حريمي",
+    "اسدال شريطه", "اسدال جوبير حريمي", "اسدال بنس حريمي", "اسدال بخمار حريمي سادة",
+    "اسدال وقار سادة", "خمار بأكمام سادة", "جيبه صلاه ليكرا", "سجادة جيب",
+    "طقم جيب وتر بروف", "جيبة صلاة وتر بروف", "طقم صلاه حريمي سادة",
+    "طقم الاميرات حريمي", "طقم صلاه حريمي مشجر", "اسدال تلبيسه حريمي",
+    "اسدال بخمار أطفالي", "اسدال مطرز", "اسدال بنس اطفالي", "طقم الاميرات اطفالي",
+    "طقم صلاه اطفالي ساده", "طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات",
+    "اسدال جوبير اطفالي", "شنطة تهادوا تحابوا", "طقم صلاه حريمي قطعتين لون كشميري فراشات",
+    "اسدال بجيوب اطفالي", "اسدال تلبيسه اطفالي"
+  ],
+
+  // 50 Master Warehouse Route Sequence Defaults (from official layout document بلا عنوان.pdf)
+  DEFAULT_WAREHOUSE_ROUTE_SEQUENCE: [
+    // Page 1
+    "تلبيسه اطفالي",
+    "بنس اطفالي",
+    "اميرات اطفالي",
+    "اسدال بخمار اطفالي", // matches ساده ومشجر
+    "رقه اطفالي",
+    "خمار بيليسيه اطفالي",
+    "جوبير اطفالي",
+    "اسدال مشجر اطفالي",
+    "بجيوب اطفالي",
+    "طقم وتر بروف",
+    "جيبه وتر بروف",
+    "ملحفه وتر بروف",
+    "بطانه وتر بروف",
+    "سجاده وتر بروف",
+    "اسدال مشجر حريمي",
+    "ملحفه صلاه فسكوز ساده",
+    "ملحفه صلاه فسكوز مشجر",
+    "خمار بيليسيه",
+    "خمار بدون اكمام مشجر",
+    "خمار بدون اكمام ساده",
+    "خمار مشجر باكمام",
+    "خمار مشجر بدون اكمام",
+    // Page 2
+    "بجيوب حريمي",
+    "طقم صلاه فسكوز",
+    "بخمار حريمي", // matches ساده ومشجر
+    "رقه حريمي",
+    "كشكشه",
+    "بنس حريمي",
+    "اميرات حريمي",
+    "شريطه حريمي",
+    "مطرز",
+    "جوبير حريمي",
+    "تلبيسه حريمي",
+    "وقار",
+    "عبايه",
+    "زهره",
+    "جيبه فسكوز",
+    "طقم صلاه حريمي مشجر",
+    "طقم صلاه حريمي ساده",
+    "طقم صلاه اطفالي مقاس 4 مشجر",
+    "طقم صلاه اطفالي مقاس 4 ساده",
+    "طقم صلاه اطفالي مقاس 3 مشجر",
+    "طقم صلاه اطفالي مقاس 3 ساده",
+    "طقم صلاه اطفالي مقاس 2 مشجر",
+    "طقم صلاه اطفالي مقاس 2 ساده",
+    "طقم صلاه اطفالي مقاس 1 مشجر",
+    "طقم صلاه اطفالي مقاس 1 ساده",
+    "جيبه صلاه ليكرا",
+    // Page 3
+    "سجاد اطفالي",
+    "سجاد حريمي"
+  ],
+
+  // Active Mutable Warehouse Titles (populated from localStorage or defaults)
   WAREHOUSE_TITLES: [
     "اسدال رقة اطفالي", "اسدال رقة حريمي", "اسدال مشجر اطفالي", "جيبة بطانة",
     "خمار مشجر بأكمام", "ملحفة صلاة مشجرة", "ملحفه جيب وتر بروف", "توتي باج",
@@ -25,6 +103,289 @@ const ArabicUtils = {
     "اسدال جوبير اطفالي", "شنطة تهادوا تحابوا", "طقم صلاه حريمي قطعتين لون كشميري فراشات",
     "اسدال بجيوب اطفالي", "اسدال تلبيسه اطفالي"
   ],
+
+  // Active Mutable Warehouse Route Sequence (populated from localStorage or defaults)
+  WAREHOUSE_ROUTE_SEQUENCE: [
+    // Page 1
+    "تلبيسه اطفالي",
+    "بنس اطفالي",
+    "اميرات اطفالي",
+    "اسدال بخمار اطفالي", // matches ساده ومشجر
+    "رقه اطفالي",
+    "خمار بيليسيه اطفالي",
+    "جوبير اطفالي",
+    "اسدال مشجر اطفالي",
+    "بجيوب اطفالي",
+    "طقم وتر بروف",
+    "جيبه وتر بروف",
+    "ملحفه وتر بروف",
+    "بطانه وتر بروف",
+    "سجاده وتر بروف",
+    "اسدال مشجر حريمي",
+    "ملحفه صلاه فسكوز ساده",
+    "ملحفه صلاه فسكوز مشجر",
+    "خمار بيليسيه",
+    "خمار بدون اكمام مشجر",
+    "خمار بدون اكمام ساده",
+    "خمار مشجر باكمام",
+    "خمار مشجر بدون اكمام",
+    // Page 2
+    "بجيوب حريمي",
+    "طقم صلاه فسكوز",
+    "بخمار حريمي", // matches ساده ومشجر
+    "رقه حريمي",
+    "كشكشه",
+    "بنس حريمي",
+    "اميرات حريمي",
+    "شريطه حريمي",
+    "مطرز",
+    "جوبير حريمي",
+    "تلبيسه حريمي",
+    "وقار",
+    "عبايه",
+    "زهره",
+    "جيبه فسكوز",
+    "طقم صلاه حريمي مشجر",
+    "طقم صلاه حريمي ساده",
+    "طقم صلاه اطفالي مقاس 4 مشجر",
+    "طقم صلاه اطفالي مقاس 4 ساده",
+    "طقم صلاه اطفالي مقاس 3 مشجر",
+    "طقم صلاه اطفالي مقاس 3 ساده",
+    "طقم صلاه اطفالي مقاس 2 مشجر",
+    "طقم صلاه اطفالي مقاس 2 ساده",
+    "طقم صلاه اطفالي مقاس 1 مشجر",
+    "طقم صلاه اطفالي مقاس 1 ساده",
+    "جيبه صلاه ليكرا",
+    // Page 3
+    "سجاد اطفالي",
+    "سجاد حريمي"
+  ],
+
+  /**
+   * Initializes catalog from localStorage if previously stored
+   */
+  initCatalogFromStorage() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const savedRoute = localStorage.getItem('bosta_warehouse_route_sequence');
+      const savedTitles = localStorage.getItem('bosta_warehouse_titles');
+      if (savedRoute) {
+        const parsed = JSON.parse(savedRoute);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.WAREHOUSE_ROUTE_SEQUENCE = parsed;
+        }
+      }
+      if (savedTitles) {
+        const parsedTitles = JSON.parse(savedTitles);
+        if (Array.isArray(parsedTitles) && parsedTitles.length > 0) {
+          this.WAREHOUSE_TITLES = parsedTitles;
+        }
+      }
+      this.syncGlobalCatalog();
+    } catch (e) {
+      console.warn('Error loading catalog from localStorage:', e);
+    }
+  },
+
+  /**
+   * Dynamically appends new products to the route sequence and catalog
+   */
+  addProductsToCatalog(items, saveToStorage = true) {
+    if (!items || !Array.isArray(items)) {
+      return { addedCount: 0, totalRouteCount: this.WAREHOUSE_ROUTE_SEQUENCE.length, addedItems: [] };
+    }
+    const addedItems = [];
+
+    for (const rawItem of items) {
+      const itemTitle = (typeof rawItem === 'string' ? rawItem : (rawItem.title || rawItem.modelName || '')).trim();
+      if (!itemTitle || itemTitle.length < 2) continue;
+
+      // Check if already in WAREHOUSE_ROUTE_SEQUENCE
+      const normNew = itemTitle.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+      let existsInRoute = false;
+      for (const existing of this.WAREHOUSE_ROUTE_SEQUENCE) {
+        const normExist = existing.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+        if (normExist === normNew || normExist.includes(normNew) || normNew.includes(normExist)) {
+          existsInRoute = true;
+          break;
+        }
+      }
+
+      if (!existsInRoute) {
+        this.WAREHOUSE_ROUTE_SEQUENCE.push(itemTitle);
+        addedItems.push(itemTitle);
+      }
+
+      // Also ensure presence in WAREHOUSE_TITLES
+      let existsInTitles = this.WAREHOUSE_TITLES.some(t => {
+        const normExist = t.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+        return normExist === normNew;
+      });
+      if (!existsInTitles) {
+        this.WAREHOUSE_TITLES.push(itemTitle);
+      }
+    }
+
+    if (saveToStorage && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('bosta_warehouse_route_sequence', JSON.stringify(this.WAREHOUSE_ROUTE_SEQUENCE));
+        localStorage.setItem('bosta_warehouse_titles', JSON.stringify(this.WAREHOUSE_TITLES));
+      } catch (e) {
+        console.warn('LocalStorage save error:', e);
+      }
+    }
+
+    this.syncGlobalCatalog();
+
+    return {
+      addedCount: addedItems.length,
+      totalRouteCount: this.WAREHOUSE_ROUTE_SEQUENCE.length,
+      addedItems
+    };
+  },
+
+  /**
+   * Restores catalog back to default 50 master route items
+   */
+  resetCatalogToDefault() {
+    this.WAREHOUSE_ROUTE_SEQUENCE = [...this.DEFAULT_WAREHOUSE_ROUTE_SEQUENCE];
+    this.WAREHOUSE_TITLES = [...this.DEFAULT_WAREHOUSE_TITLES];
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem('bosta_warehouse_route_sequence');
+        localStorage.removeItem('bosta_warehouse_titles');
+      } catch (e) {
+        console.warn('LocalStorage clear error:', e);
+      }
+    }
+
+    this.syncGlobalCatalog();
+
+    return {
+      totalRouteCount: this.WAREHOUSE_ROUTE_SEQUENCE.length
+    };
+  },
+
+  /**
+   * Removes a product from the active route sequence
+   */
+  removeProductFromCatalog(target) {
+    const idx = typeof target === 'number' ? target : this.WAREHOUSE_ROUTE_SEQUENCE.indexOf(target);
+    if (idx >= 0 && idx < this.WAREHOUSE_ROUTE_SEQUENCE.length) {
+      const removed = this.WAREHOUSE_ROUTE_SEQUENCE.splice(idx, 1)[0];
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem('bosta_warehouse_route_sequence', JSON.stringify(this.WAREHOUSE_ROUTE_SEQUENCE));
+        } catch (e) {}
+      }
+      this.syncGlobalCatalog();
+      return { removed, totalRouteCount: this.WAREHOUSE_ROUTE_SEQUENCE.length };
+    }
+    return { removed: null, totalRouteCount: this.WAREHOUSE_ROUTE_SEQUENCE.length };
+  },
+
+  /**
+   * Synchronizes active catalog to global and PDFProcessor objects
+   */
+  syncGlobalCatalog() {
+    if (typeof window !== 'undefined') {
+      window.WAREHOUSE_ROUTE_SEQUENCE = this.WAREHOUSE_ROUTE_SEQUENCE;
+      if (window.PDFProcessor) {
+        window.PDFProcessor.WAREHOUSE_ROUTE_SEQUENCE = this.WAREHOUSE_ROUTE_SEQUENCE;
+      }
+    }
+    if (typeof global !== 'undefined') {
+      global.WAREHOUSE_ROUTE_SEQUENCE = this.WAREHOUSE_ROUTE_SEQUENCE;
+      if (global.PDFProcessor) {
+        global.PDFProcessor.WAREHOUSE_ROUTE_SEQUENCE = this.WAREHOUSE_ROUTE_SEQUENCE;
+      }
+    }
+  },
+
+  /**
+   * Extracts candidate new products from parsed pages that are not in current catalog
+   */
+  extractDiscoveredProductsFromPages(pages) {
+    if (!pages || !Array.isArray(pages)) return [];
+    const discovered = new Map();
+
+    for (const page of pages) {
+      const products = page.products || (page.primaryProduct ? [page.primaryProduct] : []);
+      for (const prod of products) {
+        const desc = prod.description || prod.formattedLineText || prod.rawLineText || prod.modelName || '';
+        const rank = this.getWarehouseRouteRank(desc);
+        if (rank === 999) {
+          let candidate = prod.modelName || desc;
+          candidate = candidate.replace(/\([^)]*\)/g, '').replace(/\b(QTY|qty)\s*\d+/gi, '').trim();
+          candidate = candidate.replace(/[-–—/].*$/, '').trim();
+          if (candidate.length >= 3 && !/^\d+$/.test(candidate) && !/^[A-Za-z0-9_-]+$/.test(candidate)) {
+            const norm = candidate.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+            if (!discovered.has(norm)) {
+              discovered.set(norm, {
+                modelName: candidate,
+                samplePage: page.originalPageNumber || page.newPageNumber || 1,
+                rawSnippet: desc
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return Array.from(discovered.values());
+  },
+
+  // Helper to find the best route index (0 to 49) for any given product
+  getWarehouseRouteRank(productDescription) {
+    const norm = (productDescription || "")
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .replace(/\s+/g, "");
+
+    if (!norm) return 999;
+
+    for (let i = 0; i < this.WAREHOUSE_ROUTE_SEQUENCE.length; i++) {
+      const target = this.WAREHOUSE_ROUTE_SEQUENCE[i]
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .replace(/\s+/g, "");
+
+      if (norm.includes(target) || target.includes(norm)) {
+        return i;
+      }
+    }
+
+    // Smart fallback for prayer rugs and carpets
+    const isCarpet = norm.includes("سجاد") || norm.includes("سجاده");
+    if (isCarpet) {
+      if (norm.includes("وتربروف")) return 13;
+      const isKids = norm.includes("اطفال") || norm.includes("اطفالي");
+      return isKids ? 48 : 49;
+    }
+
+    return 999; // Fallback for unlisted items
+  },
+
+  // Helper to compute route rank for an entire order (minimum route index among its items)
+  getOrderRouteRank(order) {
+    if (!order) return 999;
+    if (order.products && order.products.length > 0) {
+      const ranks = order.products.map(p => {
+        const desc = p.description || p.formattedLineText || p.rawLineText || p.modelName || '';
+        let r = this.getWarehouseRouteRank(desc);
+        if (r === 999 && p.modelName) {
+          r = this.getWarehouseRouteRank(p.modelName);
+        }
+        return r;
+      });
+      return Math.min(...ranks);
+    }
+    const fallbackDesc = order.description || order.modelName || order.rawDescription || '';
+    return this.getWarehouseRouteRank(fallbackDesc);
+  },
 
   // Known standard colors
   KNOWN_COLORS: [
@@ -671,6 +1032,7 @@ const ArabicUtils = {
       // 5. Product Line extraction (STRICT: only lines with QTY)
       const parsedProduct = this.parseProductLine(line);
       if (parsedProduct) {
+        parsedProduct.description = parsedProduct.description || parsedProduct.formattedLineText || parsedProduct.rawLineText || parsedProduct.modelName;
         products.push(parsedProduct);
         lastProductIndex = i;
       }
@@ -745,7 +1107,10 @@ const ArabicUtils = {
       trackingNumber: trackingNumber || (orderReference ? orderReference : `AWB-${pageNumber}`),
       orderReference: orderReference || trackingNumber,
       piecesCount,
-      totalPieces,
+      totalPieces: piecesCount,
+      totalPiecesInt: piecesCount,
+      totalPiecesStr: totalPieces,
+      routeRank: this.getOrderRouteRank({ products, modelName: primaryProduct.modelName, rawDescription: products.map(p => p.raw).join('\n') }),
       city: city || 'مصر',
       products,
       isMultiProduct,
@@ -803,4 +1168,8 @@ const ArabicUtils = {
 
 if (typeof window !== 'undefined') {
   window.ArabicUtils = ArabicUtils;
+  ArabicUtils.initCatalogFromStorage();
+  window.WAREHOUSE_ROUTE_SEQUENCE = ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE;
+  window.getWarehouseRouteRank = ArabicUtils.getWarehouseRouteRank.bind(ArabicUtils);
+  window.getOrderRouteRank = ArabicUtils.getOrderRouteRank.bind(ArabicUtils);
 }

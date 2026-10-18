@@ -123,6 +123,216 @@
       </div>
     </div>
 
+    <!-- Feature 4: Integrated Multi-PDF Merge & Resize Tool (Expandable Card) -->
+    <div id="multi-pdf-container" class="bg-gradient-to-r from-slate-900 via-indigo-950/30 to-slate-900 border border-indigo-500/30 rounded-2xl shadow-xl overflow-hidden transition-all">
+      <!-- Header / Accordion Button -->
+      <div id="toggle-multi-pdf-btn" class="p-4 sm:p-5 flex items-center justify-between cursor-pointer select-none bg-slate-900/80 hover:bg-slate-800/60 transition">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 text-lg">
+            📑
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="font-bold text-white text-sm sm:text-base">أداة دمج وتصغير ملفات PDF المتعددة (بديل PDF24 التلقائي)</h3>
+              <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30 font-medium">ميزة جديدة ⚡</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">ادمج ملفات PDF متعددة مع ضبط مقاس الصفحات تلقائياً إلى 75×125 ملم وبدء الفرز مباشرة بضغطة واحدة</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="multi-pdf-count-badge" class="hidden text-xs bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 px-2.5 py-1 rounded-lg font-mono font-bold">0 ملفات</span>
+          <svg id="multi-pdf-chevron" class="w-5 h-5 text-slate-400 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+
+      <!-- Expandable Content -->
+      <div id="multi-pdf-content" class="p-5 border-t border-slate-800/80 space-y-4">
+        <!-- Multi-PDF Dropzone -->
+        <div id="multi-pdf-dropzone" class="border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 bg-slate-950/60 rounded-xl p-6 text-center cursor-pointer transition-all">
+          <input type="file" id="multi-pdf-input" multiple accept=".pdf" class="hidden">
+          <div class="w-12 h-12 mx-auto mb-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+          </div>
+          <p class="font-semibold text-slate-200 text-xs sm:text-sm mb-1">اسحب وأفلت ملفات PDF المتعددة هنا، أو اضغط لاختيار عدة ملفات معاً</p>
+          <p class="text-[11px] text-slate-400">يمكنك تحديد ملفين أو أكثر لدمجهم تلقائياً في ملف واحد منظم بمقاس حراري موحد (75×125 ملم)</p>
+        </div>
+
+        <!-- Files List -->
+        <div id="multi-pdf-list-container" class="hidden space-y-2">
+          <div class="flex items-center justify-between text-xs text-slate-400 px-1">
+            <span>الملفات المحددة للدمج (الترتيب من الأعلى للأسفل):</span>
+            <button id="clear-multi-pdf-btn" class="text-rose-400 hover:text-rose-300 transition text-[11px] font-semibold">إفراغ القائمة ✕</button>
+          </div>
+          <div id="multi-pdf-file-list" class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            <!-- Dynamic file items -->
+          </div>
+        </div>
+
+        <!-- Merge & Resize Action Button -->
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <div class="text-xs text-slate-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>سيتم تحويل أبعاد كل ورقة لنسبة 75×125 ملم مع الحفاظ الكامل على دقة الباركود والـ QR Code</span>
+          </div>
+          <button id="merge-and-process-btn" disabled class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-xs w-full sm:w-auto">
+            <span>🚀 دمج وتصغير الملفات إلى مقاس (75×125 ملم) والبدء بالفرز</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Warehouse Catalog & Route Manager (Dynamic Inventory & PDF Uploader) -->
+    <div id="catalog-manager-container" class="bg-gradient-to-r from-slate-900 via-teal-950/20 to-slate-900 border border-teal-500/30 rounded-2xl shadow-xl overflow-hidden transition-all">
+      <!-- Header / Accordion Button -->
+      <div id="toggle-catalog-manager-btn" class="p-4 sm:p-5 flex items-center justify-between cursor-pointer select-none bg-slate-900/80 hover:bg-slate-800/60 transition">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center border border-teal-500/30 text-lg">
+            🏬
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="font-bold text-white text-sm sm:text-base">إدارة وتحديث كتالوج ممرات المخزن (CSV / Excel / PDF)</h3>
+              <span class="text-[10px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded border border-teal-500/30 font-medium">ديناميكي مستمر ⚡</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">تحديث تسلسل ممرات المخزن المعتمدة، إضافة موديلات وSKUs جديدة ديناميكياً من الشيتات أو ملفات الـ PDF، مع الحفظ التلقائي في المتصفح</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="catalog-status-badge" class="text-xs bg-teal-500/20 text-teal-300 border border-teal-500/40 px-2.5 py-1 rounded-lg font-mono font-bold">📊 الكتالوج النشط: 50 صنفاً معتمداً</span>
+          <svg id="catalog-manager-chevron" class="w-5 h-5 text-slate-400 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+
+      <!-- Expandable Content -->
+      <div id="catalog-manager-content" class="hidden p-5 border-t border-slate-800/80 space-y-5">
+        <!-- Top Control Bar -->
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
+          <div class="flex items-center gap-2.5 text-xs">
+            <span class="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
+            <span id="catalog-info-text" class="text-slate-200 font-semibold">الكتالوج النشط حالياً يضم 50 صنف وموديل معتمد.</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <button id="catalog-reset-btn" class="text-xs bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+              <span>🔄 استعادة القائمة الافتراضية للـ 50 موديلاً</span>
+            </button>
+            <button id="catalog-export-btn" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+              <span>📥 تصدير الكتالوج (CSV)</span>
+            </button>
+            <button id="catalog-toggle-view-btn" class="text-xs bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+              <span>👁️ عرض أصناف المسار</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 2 Side-by-Side Uploader Dropzones -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- 1. CSV / Excel Uploader -->
+          <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-teal-500/20 text-teal-300 text-xs font-bold flex items-center justify-center border border-teal-500/30">1</span>
+                  <h4 class="font-bold text-white text-xs sm:text-sm">رفع شيت محدّث للمخزن (CSV / Excel)</h4>
+                </div>
+                <span class="text-[10px] bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded font-mono">دمج تلقائي</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mb-3">ارفع شيت الموديلات الجديد (.csv أو .xlsx). سيقوم النظام باستخراج الموديلات والـ SKUs وإلحاق أي أصناف جديدة بالمسار وحفظها في المتصفح فوراً.</p>
+
+              <!-- Dropzone -->
+              <div id="catalog-excel-dropzone" class="border-2 border-dashed border-teal-500/40 hover:border-teal-400 bg-slate-900/60 rounded-xl p-4 text-center cursor-pointer transition">
+                <input type="file" id="catalog-excel-input" accept=".csv, .xlsx, .xls" class="hidden">
+                <div class="w-10 h-10 mx-auto mb-2 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <p class="text-xs font-semibold text-slate-200 mb-0.5">اختر ملف CSV / Excel أو اسحبه هنا</p>
+                <p class="text-[10px] text-slate-400">يدعم شيتات Shopify / Salla ومخزن خيام</p>
+              </div>
+            </div>
+
+            <div id="catalog-excel-result" class="hidden p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300">
+              <!-- Dynamic merge result -->
+            </div>
+          </div>
+
+          <!-- 2. Dynamic PDF Catalog Extractor -->
+          <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-purple-500/20 text-purple-300 text-xs font-bold flex items-center justify-center border border-purple-500/30">2</span>
+                  <h4 class="font-bold text-white text-xs sm:text-sm">إضافة منتجات من ملف PDF تجريبي</h4>
+                </div>
+                <span class="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono">فحص البوالص</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mb-3">ارفع ملف PDF لبوالص بوسطة، وسيقوم النظام بفحص كافة بنود الشحنات واستخراج أي موديلات جديدة غير مسجلة لاقتراح إضافتها لممرات المخزن.</p>
+
+              <!-- Dropzone -->
+              <div id="catalog-pdf-dropzone" class="border-2 border-dashed border-purple-500/40 hover:border-purple-400 bg-slate-900/60 rounded-xl p-4 text-center cursor-pointer transition">
+                <input type="file" id="catalog-pdf-input" accept=".pdf" class="hidden">
+                <div class="w-10 h-10 mx-auto mb-2 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <p class="text-xs font-semibold text-slate-200 mb-0.5">اختر ملف PDF بوالص تجريبي لفحصه</p>
+                <p class="text-[10px] text-slate-400">استخراج الموديلات غير المكتشفة تلقائياً</p>
+              </div>
+            </div>
+
+            <div id="catalog-pdf-status" class="hidden p-2.5 rounded-lg text-[11px]">
+              <!-- Dynamic status -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Discovered Products Prompt Section (Hidden until PDF scanned) -->
+        <div id="catalog-discovered-section" class="hidden p-4 rounded-xl bg-purple-950/30 border border-purple-500/30 space-y-3">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-base">💡</span>
+              <div>
+                <h5 class="text-xs sm:text-sm font-bold text-white">الموديلات المكتشفة حديثاً في ملف الـ PDF:</h5>
+                <p class="text-[11px] text-purple-200/80">الموديلات التالية غير مسجلة حالياً في كتالوج ممرات المخزن. يمكنك إضافتها الآن للمسار:</p>
+              </div>
+            </div>
+            <button id="catalog-add-all-discovered-btn" class="text-xs bg-purple-600 hover:bg-purple-500 text-white font-bold px-3 py-1.5 rounded-lg shadow transition flex items-center gap-1.5 shrink-0">
+              <span>⚡ إضافة جميع الموديلات المكتشفة</span>
+            </button>
+          </div>
+          <div id="catalog-discovered-chips" class="flex flex-wrap gap-2 pt-1">
+            <!-- Dynamic Chips -->
+          </div>
+        </div>
+
+        <!-- Live Catalog Inspector (List of all sequence items) -->
+        <div id="catalog-inspector-section" class="hidden p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div>
+              <h5 class="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                <span>📋 قائمة أصناف مسار ممرات المخزن النشطة:</span>
+                <span id="catalog-inspector-count" class="text-[11px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded font-mono">50 موديلاً</span>
+              </h5>
+              <p class="text-[11px] text-slate-400">هذا هو الترتيب الفعلي الذي يسير به عمال التجهيز في الممرات من البداية (#1) وحتى النهاية.</p>
+            </div>
+            <div class="w-full sm:w-64">
+              <input type="text" id="catalog-inspector-search" placeholder="بحث في الموديلات..." class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:border-teal-500 focus:outline-none">
+            </div>
+          </div>
+          <div id="catalog-inspector-items" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-64 overflow-y-auto pr-1">
+            <!-- Dynamic route items -->
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Step 1: Upload Zones -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
@@ -182,7 +392,7 @@
             <div class="flex items-center gap-2">
               <span class="w-6 h-6 rounded-full bg-teal-500/20 text-teal-400 text-xs font-bold flex items-center justify-center border border-teal-500/30">2</span>
               <h3 class="font-bold text-white text-base">ملف المخزون (Excel / CSV)</h3>
-              <span class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium">اختياري</span>
+              <span id="inventory-status-pill" class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition">اختياري</span>
             </div>
           </div>
 
@@ -196,15 +406,18 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <p class="font-semibold text-slate-200 text-sm mb-1">رفع شيت المخزون (inventory_export)</p>
+              <p class="font-semibold text-slate-200 text-sm mb-1">رفع شيت المخزون (inventory_export_1.csv)</p>
               <p class="text-xs text-slate-400">أعمدة: Title, Option1 Value, Option2 Value, SKU</p>
             </div>
 
-            <div id="inventory-file-info" class="hidden flex items-center justify-between bg-slate-900 border border-slate-700 p-3.5 rounded-lg text-right">
+            <div id="inventory-file-info" class="hidden flex items-center justify-between bg-slate-900 border border-teal-500/40 p-3.5 rounded-lg text-right">
               <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold text-xs">XLSX</div>
+                <div class="w-10 h-10 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold text-xs">CSV</div>
                 <div>
-                  <div id="inventory-file-name" class="font-semibold text-sm text-white max-w-xs truncate">inventory.xlsx</div>
+                  <div class="flex items-center gap-2">
+                    <span id="inventory-file-name" class="font-semibold text-sm text-white max-w-xs truncate">inventory.csv</span>
+                    <span id="inventory-connected-badge" class="text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-bold">تم ربط شيت المخزن</span>
+                  </div>
                   <div id="inventory-file-size" class="text-xs text-slate-400">0 KB</div>
                 </div>
               </div>
@@ -244,8 +457,8 @@
               <span class="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
               <span>الترتيب النشط:</span>
             </div>
-            <div class="text-sm font-black text-white leading-relaxed">
-              عدد القطع تنازلياً (الأكبر أولاً) ➔ حريمي ثم أطفالي ➔ حسب شيت المخزن
+            <div id="active-strategy-text" class="text-sm font-black text-white leading-relaxed">
+              الترتيب النشط: عدد القطع تنازلياً ➔ مسار ممرات المخزن (50 موديلاً معتمداً)
             </div>
           </div>
 
@@ -255,23 +468,23 @@
               <span class="bg-rose-500/20 text-rose-300 font-bold px-1.5 py-0.5 rounded text-[11px] shrink-0">المستوى 1</span>
               <div>
                 <span class="font-bold text-slate-200">إجمالي عدد القطع تنازلياً (إلزامي ورئيسي):</span>
-                <span class="text-slate-400 block mt-0.5">الأوردرات الكبرى (3+ قطع تنازلياً: 8، 7، 6...) ← أوردرات القطعتين (2 قطع) ← أوردرات القطعة الواحدة (دائماً في نهاية الملف).</span>
+                <span class="text-slate-400 block mt-0.5">الأوردرات الكبرى (3+ قطع تنازلياً: 8، 7، 6...) ← أوردرات القطعتين (2 قطع) ← أوردرات القطعة الواحدة (1 قطعة) في النهاية.</span>
               </div>
             </div>
 
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 flex items-start gap-2.5">
               <span class="bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded text-[11px] shrink-0">المستوى 2</span>
               <div>
-                <span class="font-bold text-slate-200">تجميع الأقسام داخل كل فئة (إلزامي وتجميعي):</span>
-                <span class="text-slate-400 block mt-0.5">أصناف الحريمي أولاً ➔ أصناف الأطفال ثانياً ➔ السجاد والشنط والمنتجات الأخرى ثالثاً.</span>
+                <span class="font-bold text-slate-200">مسار ممرات المخزن المعتمد (50 موديلاً من البداية للنهاية):</span>
+                <span class="text-slate-400 block mt-0.5">فرز أوردرات القطعة الواحدة وفق تسلسل الممرات (#1 تلبيسه اطفالي إلى #50 سجاد حريمي)، وفي الأوردرات المتعددة حسب أول ممر يتم الوصول إليه.</span>
               </div>
             </div>
 
             <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 flex items-start gap-2.5">
               <span class="bg-teal-500/20 text-teal-300 font-bold px-1.5 py-0.5 rounded text-[11px] shrink-0">المستوى 3</span>
               <div>
-                <span class="font-bold text-slate-200">مسار ممرات المخزن (شيت الـ SKU / CSV):</span>
-                <span class="text-slate-400 block mt-0.5">مطابقة أكواد الـ SKU والاسم مع صفوف شيت المخزن المرفوع لفرز الأصناف وفق خط سير الممرات لمنع التراجع.</span>
+                <span class="font-bold text-slate-200">شيت المخزن / تسلسل الـ SKU (اختياري عبر ملف الـ CSV):</span>
+                <span class="text-slate-400 block mt-0.5">استخدام تسلسل صفوف شيت الـ CSV المرفوع كمعيار فك تشابه دقيق داخل نفس رتبة الموديل.</span>
               </div>
             </div>
           </div>
@@ -303,7 +516,7 @@
                 <span class="text-[11px] text-slate-400 block mt-0.5 leading-relaxed">
                   • <b>الأوردرات الكبرى (3+ قطع):</b> تجميع في دفعات حتى 30 قطعة + بطاقة تجميع الأصناف والـ SKU + صفحة بيضاء.<br>
                   • <b>أوردرات القطعتين:</b> تجميع في دفعات حتى 10 قطع (5 أوردرات) + بطاقة تجميع + صفحة بيضاء.<br>
-                  • <b>أوردرات القطعة الواحدة:</b> فصل الأقسام (حريمي/أطفالي/أخرى) بصفحة بيضاء فقط دون بطاقات تجميع.
+                  • <b>أوردرات القطعة الواحدة (الوحايد):</b> لا يتم طباعة بطاقة تجميع ولا صفحات بيضاء داخلها (مباشرة قطعة بقطعة).
                 </span>
               </div>
             </label>
@@ -601,7 +814,7 @@
                     <span class="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded font-mono">75×125 mm</span>
                   </span>
                   <span class="text-[11px] text-slate-400 block mt-0.5">
-                    إدراج بطاقة تجميع الأصناف + صفحة بيضاء فاصلة بعد كل دفعة (حتى 30 قطعة للكبرى، وحتى 10 قطع للقطعتين)، وفصل أقسام القطعة الواحدة بصفحة بيضاء.
+                    إدراج بطاقة تجميع الأصناف + صفحة بيضاء فاصلة بعد كل دفعة (حتى 30 قطعة للكبرى، وحتى 10 قطع للقطعتين)، وأوردرات القطعة الواحدة مباشرة دون بطاقات أو فواصل.
                   </span>
                 </div>
               </label>
@@ -622,15 +835,7 @@
                   <span class="text-slate-500">→</span>
                   <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 صفحة بيضاء</span>
                   <span class="text-slate-500">→</span>
-                  <span class="bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded border border-rose-500/30">3. حريمي 1ق</span>
-                  <span class="text-slate-500">→</span>
-                  <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 صفحة بيضاء</span>
-                  <span class="text-slate-500">→</span>
-                  <span class="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">4. أطفالي 1ق</span>
-                  <span class="text-slate-500">→</span>
-                  <span class="bg-white/10 text-white px-1.5 py-0.5 rounded border border-white/20">📄 صفحة بيضاء</span>
-                  <span class="text-slate-500">→</span>
-                  <span class="bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded border border-teal-500/30">5. منتجات أخرى</span>
+                  <span class="bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">3. الوحايد (1 ق): حريمي ➔ أطفالي ➔ أخرى (مباشرة دون فواصل)</span>
                 </div>
               </div>
             </div>
@@ -682,8 +887,13 @@
           </div>
 
           <div class="flex items-center gap-2.5 w-full md:w-auto flex-wrap sm:flex-nowrap">
+            <!-- Custom Filename Input (Feature 3) -->
+            <div class="relative flex-1 sm:w-56" title="تسمية ملف الـ PDF قبل التنزيل">
+              <input type="text" id="custom-filename-input" placeholder="اسم الملف قبل التنزيل..." class="w-full bg-slate-950 border border-slate-700 rounded-xl pr-3 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:border-teal-500 focus:outline-none transition" />
+            </div>
+
             <!-- Search Input -->
-            <div class="relative flex-1 sm:w-64">
+            <div class="relative flex-1 sm:w-60">
               <input type="text" id="table-search-input" placeholder="بحث باللون (اسود، كشمير)، الموديل، كود SKU..." class="w-full bg-slate-950 border border-slate-700 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:border-teal-500 focus:outline-none">
               <svg class="w-4 h-4 text-slate-500 absolute right-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
