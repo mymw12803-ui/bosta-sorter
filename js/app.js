@@ -12,7 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     inventoryArrayBuffer: null,
     extractedPages: [],
     sortedPages: [],
-    selectedStrategy: '1',
+    useWalkSequence: true,
+    enableBatchPickLists: true,
     insertBlankSeparators: true,
     resizeEnabled: true,
     keepAspectRatio: true,
@@ -45,8 +46,11 @@ document.addEventListener('DOMContentLoaded', () => {
     inventoryFileSize: document.getElementById('inventory-file-size'),
     removeInventoryBtn: document.getElementById('remove-inventory-btn'),
 
-    // Strategies
-    strategyRadios: document.querySelectorAll('input[name="sorting-strategy"]'),
+    // Unified Pipeline Toggles
+    walkSequenceToggle: document.getElementById('walk-sequence-toggle'),
+    batchPicklistsToggle: document.getElementById('batch-picklists-toggle'),
+    panelWalkSequenceToggle: document.getElementById('panel-walk-sequence-toggle'),
+    panelBatchPicklistsToggle: document.getElementById('panel-batch-picklists-toggle'),
     reverseArabicCheckbox: document.getElementById('reverse-arabic-checkbox'),
 
     // Expandable sorting panel elements
@@ -55,11 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
     sortingPanelChevron: document.getElementById('sorting-panel-chevron'),
     panelActiveStrategyBadge: document.getElementById('panel-active-strategy-badge'),
     panelSeparatorBadge: document.getElementById('panel-separator-badge'),
-    panelStrategyRadios: document.querySelectorAll('input[name="panel-sorting-strategy"]'),
-
-    // Blank separator checkboxes
-    blankSeparatorsCheckbox: document.getElementById('blank-separators-checkbox'),
-    blankSeparatorsPanelCheckbox: document.getElementById('blank-separators-panel-checkbox'),
 
     // Walk sequence upload
     walkSequenceInput: document.getElementById('walk-sequence-input'),
@@ -372,84 +371,46 @@ document.addEventListener('DOMContentLoaded', () => {
   setupDropzone(elements.pdfDropzone, elements.pdfInput, handlePdfFile);
   setupDropzone(elements.inventoryDropzone, elements.inventoryInput, handleInventoryFile);
 
-  // Strategy updater function
-  function updateStrategy(newStrategy) {
-    state.selectedStrategy = String(newStrategy);
-
-    // Sync Step 3 radios
-    elements.strategyRadios.forEach(radio => {
-      radio.checked = (radio.value === state.selectedStrategy);
-    });
-
-    // Sync panel radios
-    if (elements.panelStrategyRadios) {
-      elements.panelStrategyRadios.forEach(radio => {
-        radio.checked = (radio.value === state.selectedStrategy);
-      });
-    }
-
-    // Update active badge text
-    if (elements.panelActiveStrategyBadge) {
-      const labels = {
-        '1': 'الترتيب العملي لمسار المخزن',
-        '2': 'حسب شيت ممرات المخزن فقط',
-        '3': 'حسب إجمالي عدد القطع فقط',
-        '4': 'حسب الأقسام حريمي وأطفالي'
-      };
-      elements.panelActiveStrategyBadge.textContent = labels[state.selectedStrategy] || 'الترتيب العملي لمسار المخزن';
-    }
-
+  // Walk Sequence Toggle Updater
+  function updateWalkSequence(enabled) {
+    state.useWalkSequence = Boolean(enabled);
+    if (elements.walkSequenceToggle) elements.walkSequenceToggle.checked = state.useWalkSequence;
+    if (elements.panelWalkSequenceToggle) elements.panelWalkSequenceToggle.checked = state.useWalkSequence;
     if (state.extractedPages.length > 0) {
       reSortAndRender();
-      showToast('تم تحديث استراتيجية الفرز وترتيب البوليصات!', 'info');
+      showToast(state.useWalkSequence ? 'تم تفعيل الترتيب حسب مسار ممرات المخزن (CSV).' : 'تم إيقاف ترتيب الممرات.', 'info');
     }
   }
 
-  // Bind Step 3 strategy radios
-  elements.strategyRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      updateStrategy(e.target.value);
-    });
-  });
-
-  // Bind panel strategy radios
-  if (elements.panelStrategyRadios) {
-    elements.panelStrategyRadios.forEach(radio => {
-      radio.addEventListener('change', (e) => {
-        updateStrategy(e.target.value);
-      });
-    });
+  if (elements.walkSequenceToggle) {
+    elements.walkSequenceToggle.addEventListener('change', (e) => updateWalkSequence(e.target.checked));
+  }
+  if (elements.panelWalkSequenceToggle) {
+    elements.panelWalkSequenceToggle.addEventListener('change', (e) => updateWalkSequence(e.target.checked));
   }
 
-  // Blank Separators toggle updater
-  function updateBlankSeparators(enabled) {
-    state.insertBlankSeparators = Boolean(enabled);
-    if (elements.blankSeparatorsCheckbox) {
-      elements.blankSeparatorsCheckbox.checked = state.insertBlankSeparators;
-    }
-    if (elements.blankSeparatorsPanelCheckbox) {
-      elements.blankSeparatorsPanelCheckbox.checked = state.insertBlankSeparators;
-    }
+  // Batch Pick Lists & Blank Separators Toggle Updater
+  function updateBatchPickLists(enabled) {
+    state.enableBatchPickLists = Boolean(enabled);
+    state.insertBlankSeparators = state.enableBatchPickLists;
+    if (elements.batchPicklistsToggle) elements.batchPicklistsToggle.checked = state.enableBatchPickLists;
+    if (elements.panelBatchPicklistsToggle) elements.panelBatchPicklistsToggle.checked = state.enableBatchPickLists;
     if (elements.panelSeparatorBadge) {
-      elements.panelSeparatorBadge.textContent = state.insertBlankSeparators
-        ? 'صفحات فاصلة بيضاء مفعلة'
-        : 'صفحات فاصلة معطلة';
-      elements.panelSeparatorBadge.className = state.insertBlankSeparators
+      elements.panelSeparatorBadge.textContent = state.enableBatchPickLists
+        ? 'بطاقات التجميع والفواصل مفعلة'
+        : 'بطاقات التجميع والفواصل معطلة';
+      elements.panelSeparatorBadge.className = state.enableBatchPickLists
         ? 'hidden sm:inline text-[11px] bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-medium border border-sky-500/30'
         : 'hidden sm:inline text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-medium border border-slate-700';
     }
-    showToast(state.insertBlankSeparators ? 'تم تفعيل الفواصل البيضاء بين المجموعات.' : 'تم تعطيل الفواصل البيضاء.', 'info');
+    showToast(state.enableBatchPickLists ? 'تم تفعيل بطاقات تجميع الدفعات والصفحات البيضاء الفاصلة.' : 'تم تعطيل بطاقات التجميع والفواصل.', 'info');
   }
 
-  if (elements.blankSeparatorsCheckbox) {
-    elements.blankSeparatorsCheckbox.addEventListener('change', (e) => {
-      updateBlankSeparators(e.target.checked);
-    });
+  if (elements.batchPicklistsToggle) {
+    elements.batchPicklistsToggle.addEventListener('change', (e) => updateBatchPickLists(e.target.checked));
   }
-  if (elements.blankSeparatorsPanelCheckbox) {
-    elements.blankSeparatorsPanelCheckbox.addEventListener('change', (e) => {
-      updateBlankSeparators(e.target.checked);
-    });
+  if (elements.panelBatchPicklistsToggle) {
+    elements.panelBatchPicklistsToggle.addEventListener('change', (e) => updateBatchPickLists(e.target.checked));
   }
 
   // Expandable panel accordion toggle
@@ -593,12 +554,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * Re-sorts pages based on current active strategy and re-renders table
+   * Re-sorts pages based on unified pipeline and re-renders table
    */
   function reSortAndRender() {
     if (!state.extractedPages || state.extractedPages.length === 0) return;
 
-    state.sortedPages = PDFProcessor.sortPages(state.extractedPages, state.selectedStrategy);
+    state.sortedPages = PDFProcessor.sortPages(state.extractedPages, { useWalkSequence: state.useWalkSequence });
     updateStatistics();
     renderTable();
     elements.resultsSection.classList.remove('hidden');
@@ -1142,7 +1103,7 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * Exact bulletproof download function
    * Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
-   * Supports blank separator pages insertion [212.60, 354.33] when options.insertBlankSeparators is true.
+   * Automatically generates batch pick-list sheets and blank separators via PDFProcessor.generateSortedPDF
    */
   async function downloadPdfBatch(pageIndices, filename = 'Bosta_Sorted.pdf', options = {}) {
     const bytes = window.rawUntouchedPdfBytes || state.masterPdfBytes;
@@ -1151,34 +1112,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     try {
-      const srcDoc = await PDFLib.PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
-      const outDoc = await PDFLib.PDFDocument.create();
+      const mergedOptions = {
+        enableBatchPickLists: options.enableBatchPickLists !== undefined ? options.enableBatchPickLists : state.enableBatchPickLists,
+        insertBlankSeparators: options.insertBlankSeparators !== undefined ? options.insertBlankSeparators : state.enableBatchPickLists,
+        useWalkSequence: state.useWalkSequence,
+        ...options
+      };
 
-      // Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
-      const indices = pageIndices.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
-      const copiedPages = await outDoc.copyPages(srcDoc, indices);
-
-      const total = copiedPages.length;
-      for (let i = 0; i < total; i++) {
-        outDoc.addPage(copiedPages[i]);
-
-        // Blank Separator Logic (صفحة بيضاء فاصلة بين المجموعات)
-        if (options.insertBlankSeparators && i < total - 1) {
-          const curPage = pageIndices[i];
-          const nextPage = pageIndices[i + 1];
-          if (curPage && nextPage && typeof PDFProcessor !== 'undefined') {
-            const rankCur = PDFProcessor.getStrategy1GroupRank(curPage);
-            const rankNext = PDFProcessor.getStrategy1GroupRank(nextPage);
-
-            // Boundary transitions: 1->2, 2->3, 3->4, 4->5
-            if (rankCur >= 1 && rankCur <= 4 && rankNext > rankCur && rankNext <= 5) {
-              outDoc.addPage([212.60, 354.33]);
-            }
-          }
-        }
-      }
-
-      const pdfBytes = await outDoc.save();
+      const pdfBytes = await PDFProcessor.generateSortedPDF(bytes, pageIndices, mergedOptions);
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1279,28 +1220,28 @@ document.addEventListener('DOMContentLoaded', () => {
   if (elements.downloadKidsBtn) {
     elements.downloadKidsBtn.addEventListener('click', async () => {
       const kids = state.sortedPages.filter(p => p.isKids);
-      await downloadPdfBatch(kids, 'قسم_الأطفالي.pdf');
+      await downloadPdfBatch(kids, 'قسم_الأطفالي.pdf', { enableBatchPickLists: false });
     });
   }
 
   if (elements.downloadWomenBtn) {
     elements.downloadWomenBtn.addEventListener('click', async () => {
       const women = state.sortedPages.filter(p => p.isWomen);
-      await downloadPdfBatch(women, 'قسم_الحريمي.pdf');
+      await downloadPdfBatch(women, 'قسم_الحريمي.pdf', { enableBatchPickLists: false });
     });
   }
 
   if (elements.downloadOtherBtn) {
     elements.downloadOtherBtn.addEventListener('click', async () => {
       const other = state.sortedPages.filter(p => p.isOther);
-      await downloadPdfBatch(other, 'قسم_منتجات_أخرى.pdf');
+      await downloadPdfBatch(other, 'قسم_منتجات_أخرى.pdf', { enableBatchPickLists: false });
     });
   }
 
   if (elements.downloadMultiBtn) {
     elements.downloadMultiBtn.addEventListener('click', async () => {
       const multi = state.sortedPages.filter(p => (p.piecesCount || p.totalItemsCount || 1) >= 2);
-      await downloadPdfBatch(multi, 'أوردرات_متعددة_القطع.pdf');
+      await downloadPdfBatch(multi, 'أوردرات_متعددة_القطع.pdf', { enableBatchPickLists: false });
     });
   }
 

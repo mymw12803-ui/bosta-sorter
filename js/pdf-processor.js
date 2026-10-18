@@ -158,35 +158,66 @@ const PDFProcessor = {
   },
 
   /**
-   * Helper to determine picking group rank for Strategy 1:
+   * Helper to determine piece group rank:
    * Rank 1: Large orders (3+ pieces)
    * Rank 2: Two-piece orders (2 pieces)
-   * Rank 3: 1-piece Women (حريمي)
-   * Rank 4: 1-piece Kids (أطفالي)
-   * Rank 5: 1-piece Others (سجاد صلاة، شنط، إكسسوارات)
-   * Rank 6: Unrecognized
+   * Rank 3: Single-piece orders (1 piece)
+   * Rank 4: Unrecognized / empty description
+   */
+  getPieceGroup(item) {
+    if (!item.hasRecognizedDescription) return 4;
+    const count = item.piecesCount || item.totalItemsCount || 1;
+    if (count >= 3) return 1;
+    if (count === 2) return 2;
+    return 3;
+  },
+
+  /**
+   * Helper to determine department rank:
+   * Rank 1: Women ("حريمي")
+   * Rank 2: Kids ("أطفالي")
+   * Rank 3: Others ("سجاد", "شنط", etc.)
+   */
+  getDeptRank(item) {
+    if (item.isWomen) return 1;
+    if (item.isKids) return 2;
+    return 3;
+  },
+
+  /**
+   * Legacy strategy 1 helper kept for backwards compatibility
    */
   getStrategy1GroupRank(item) {
     if (!item.hasRecognizedDescription) return 6;
     const count = item.piecesCount || item.totalItemsCount || 1;
     if (count >= 3) return 1;
     if (count === 2) return 2;
-    // Single piece (1 قطعة):
     if (item.isWomen) return 3;
     if (item.isKids) return 4;
     return 5;
   },
 
   /**
-   * Sort pages according to warehouse picking strategies:
-   * Strategy 1 ('1' or 'A'): Optimized Warehouse Route (مسار المخزن العملي)
-   * Strategy 2 ('2'): Pure Inventory Sheet Sequence (شيت المخزن فقط)
-   * Strategy 3 ('3'): By Piece Count Only (عدد القطع فقط تنازلياً)
-   * Strategy 4 ('4'): By Department (حسب الأقسام حريمي وأطفالي)
+   * Unified Layered Sorting Pipeline:
+   * - Layer 1 (MANDATORY & PRIMARY): Total Pieces Descending:
+   *     1. Large Orders (3+ pieces, sorted 8, 7, 6, 5, 4, 3...)
+   *     2. Two-Piece Orders (exactly 2 pieces)
+   *     3. Single-Piece Orders (exactly 1 piece)
+   * - Layer 2 (MANDATORY SECONDARY): Department Grouping:
+   *     Women ("حريمي") first -> Kids ("أطفالي") second -> Others third
+   * - Layer 3 (OPTIONAL VIA TOGGLE & UPLOAD): Warehouse CSV Sequence Order:
+   *     Sorted by row index in CSV (walkIndex ascending)
+   * - Sub-layer tie breakers: model, color, size rank, description, page
    */
-  sortPages(pages, strategy = '1') {
+  sortPages(pages, options = {}) {
     const list = [...pages];
     const arCollator = new Intl.Collator('ar', { numeric: true, sensitivity: 'base' });
+
+    let opts = options;
+    if (typeof options === 'string') {
+      opts = { strategy: options, useWalkSequence: true };
+    }
+    const useWalkSequence = opts.useWalkSequence !== false;
 
     list.sort((a, b) => {
       // Unrecognized/empty pages are pushed to the end
@@ -196,110 +227,47 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy 1 (Default - Optimized Warehouse Route / الترتيب العملي لمسار المخزن)
-      if (strategy === '1' || strategy === 'A') {
-        const rankA = this.getStrategy1GroupRank(a);
-        const rankB = this.getStrategy1GroupRank(b);
+      // Layer 1: Total Pieces Group (Large 3+ -> Two-Piece 2 -> Single 1)
+      const gA = this.getPieceGroup(a);
+      const gB = this.getPieceGroup(b);
+      if (gA !== gB) return gA - gB;
 
-        if (rankA !== rankB) {
-          return rankA - rankB;
-        }
-
-        // Within Group 1 (Large orders, >= 3 pieces): sorted descending by piece count
-        if (rankA === 1) {
-          const countA = a.piecesCount || a.totalItemsCount || 1;
-          const countB = b.piecesCount || b.totalItemsCount || 1;
-          if (countB !== countA) {
-            return countB - countA;
-          }
-        }
-
-        // Within each group / subgroup: sort by warehouse walk sequence index if available
-        const walkA = typeof a.walkIndex === 'number' ? a.walkIndex : 999999;
-        const walkB = typeof b.walkIndex === 'number' ? b.walkIndex : 999999;
-        if (walkA !== walkB) {
-          return walkA - walkB;
-        }
-
-        // Model Name Similarity
-        const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
-        if (modelCmp !== 0) return modelCmp;
-
-        // Color / Variant Code
-        const colorCmp = arCollator.compare(a.normalizedColor || '', b.normalizedColor || '');
-        if (colorCmp !== 0) return colorCmp;
-
-        // Size Rank: الأول -> الثاني -> الثالث -> الرابع
-        const sizeA = ArabicUtils.getSizeRank(a.normalizedSize);
-        const sizeB = ArabicUtils.getSizeRank(b.normalizedSize);
-        if (sizeA !== sizeB) return sizeA - sizeB;
-
-        // Full Description Tie-Breaker
-        const descCmp = arCollator.compare(a.fullNormalizedDesc || '', b.fullNormalizedDesc || '');
-        if (descCmp !== 0) return descCmp;
-
-        return a.originalPageNumber - b.originalPageNumber;
-      }
-
-      // Strategy 2 (Pure Inventory Sheet Sequence / الترتيب حسب شيت المخزن فقط)
-      if (strategy === '2' || strategy === 'C') {
-        const walkA = typeof a.walkIndex === 'number' ? a.walkIndex : 999999;
-        const walkB = typeof b.walkIndex === 'number' ? b.walkIndex : 999999;
-        if (walkA !== walkB) return walkA - walkB;
-
+      // Within Group 1 (Large orders, 3+ pieces): Pieces descending (8, 7, 6, 5, 4, 3...)
+      if (gA === 1) {
         const countA = a.piecesCount || a.totalItemsCount || 1;
         const countB = b.piecesCount || b.totalItemsCount || 1;
         if (countB !== countA) return countB - countA;
-
-        const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
-        if (modelCmp !== 0) return modelCmp;
-
-        return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy 3 (By Piece Count Only / الترتيب حسب عدد القطع فقط)
-      if (strategy === '3') {
-        const countA = a.piecesCount || a.totalItemsCount || 1;
-        const countB = b.piecesCount || b.totalItemsCount || 1;
-        if (countB !== countA) return countB - countA;
+      // Layer 2: Department Grouping: Women (1) -> Kids (2) -> Others (3)
+      const deptA = this.getDeptRank(a);
+      const deptB = this.getDeptRank(b);
+      if (deptA !== deptB) return deptA - deptB;
 
+      // Layer 3: Warehouse CSV Sequence Order (if enabled)
+      if (useWalkSequence) {
         const walkA = typeof a.walkIndex === 'number' ? a.walkIndex : 999999;
         const walkB = typeof b.walkIndex === 'number' ? b.walkIndex : 999999;
         if (walkA !== walkB) return walkA - walkB;
-
-        const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
-        if (modelCmp !== 0) return modelCmp;
-
-        const colorCmp = arCollator.compare(a.normalizedColor || '', b.normalizedColor || '');
-        if (colorCmp !== 0) return colorCmp;
-
-        return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Strategy 4 (By Department / الترتيب حسب الأقسام حريمي وأطفالي)
-      if (strategy === '4') {
-        // Group: Women (1), Kids (2), Others (3)
-        const deptA = a.isWomen ? 1 : (a.isKids ? 2 : 3);
-        const deptB = b.isWomen ? 1 : (b.isKids ? 2 : 3);
-        if (deptA !== deptB) return deptA - deptB;
-
-        const countA = a.piecesCount || a.totalItemsCount || 1;
-        const countB = b.piecesCount || b.totalItemsCount || 1;
-        if (countB !== countA) return countB - countA;
-
-        const walkA = typeof a.walkIndex === 'number' ? a.walkIndex : 999999;
-        const walkB = typeof b.walkIndex === 'number' ? b.walkIndex : 999999;
-        if (walkA !== walkB) return walkA - walkB;
-
-        const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
-        if (modelCmp !== 0) return modelCmp;
-
-        return a.originalPageNumber - b.originalPageNumber;
-      }
-
-      // Legacy fallback (Option B)
+      // Tie Breakers:
+      // Model Name
       const modelCmp = arCollator.compare(a.normalizedModel || '', b.normalizedModel || '');
       if (modelCmp !== 0) return modelCmp;
+
+      // Color / Variant Code
+      const colorCmp = arCollator.compare(a.normalizedColor || '', b.normalizedColor || '');
+      if (colorCmp !== 0) return colorCmp;
+
+      // Size Rank: الأول -> الثاني -> الثالث -> الرابع
+      const sizeA = ArabicUtils.getSizeRank(a.normalizedSize);
+      const sizeB = ArabicUtils.getSizeRank(b.normalizedSize);
+      if (sizeA !== sizeB) return sizeA - sizeB;
+
+      // Full Description Tie-Breaker
+      const descCmp = arCollator.compare(a.fullNormalizedDesc || '', b.fullNormalizedDesc || '');
+      if (descCmp !== 0) return descCmp;
 
       return a.originalPageNumber - b.originalPageNumber;
     });
@@ -311,11 +279,335 @@ const PDFProcessor = {
   },
 
   /**
+   * Generates a pick list sheet (75mm x 125mm = 212.60 x 354.33 pt)
+   * Clean high-contrast table or list with header:
+   * 📦 بطاقة تجهيز المخزن | دفعة [X] قطعة | [Y] أوردرات
+   * Columns/Rows: [ ] | اسم الموديل واللون والمقاس | كود SKU | الكمية
+   */
+  async createPickListSheet(outDoc, batch, batchType = 'large') {
+    const totalOrders = batch.length;
+    let totalPieces = 0;
+    const itemMap = new Map();
+
+    for (const order of batch) {
+      const orderPieces = order.piecesCount || order.totalItemsCount || (order.products ? order.products.reduce((a, b) => a + (b.qty || 1), 0) : 1);
+      totalPieces += orderPieces;
+
+      const items = (order.products && order.products.length > 0)
+        ? order.products
+        : [{
+            modelName: order.modelName || 'صنف غير محدد',
+            color: order.color || '',
+            colorCode: order.colorCode || '',
+            size: order.size || '',
+            qty: orderPieces,
+            sku: order.sku || ''
+          }];
+
+      for (const it of items) {
+        const itemSku = it.sku || order.sku || '';
+        const model = it.modelName || order.modelName || 'صنف غير محدد';
+        const color = it.color || '';
+        const colorCode = it.colorCode || '';
+        const size = it.size || '';
+        const qty = it.qty || 1;
+
+        const key = itemSku ? itemSku : `${model}|${color}|${size}`;
+
+        let walkIdx = 999999;
+        if (typeof InventoryParser !== 'undefined') {
+          walkIdx = InventoryParser.getWalkIndex({
+            sku: itemSku,
+            primaryProduct: it,
+            modelName: model,
+            color: color,
+            size: size
+          });
+        }
+        if (walkIdx === 999999 && typeof order.walkIndex === 'number') {
+          walkIdx = order.walkIndex;
+        }
+
+        if (itemMap.has(key)) {
+          const existing = itemMap.get(key);
+          existing.qty += qty;
+          if (walkIdx < existing.walkIndex) existing.walkIndex = walkIdx;
+        } else {
+          let displayName = model;
+          if (color && size) {
+            displayName += ` - ${color}${colorCode ? ` (${colorCode})` : ''} / ${size}`;
+          } else if (color) {
+            displayName += ` - ${color}${colorCode ? ` (${colorCode})` : ''}`;
+          } else if (size) {
+            displayName += ` / ${size}`;
+          }
+
+          itemMap.set(key, {
+            sku: itemSku,
+            name: displayName,
+            qty: qty,
+            walkIndex: walkIdx
+          });
+        }
+      }
+    }
+
+    const aggregatedItems = Array.from(itemMap.values()).sort((a, b) => a.walkIndex - b.walkIndex);
+
+    const titleSubtitle = batchType === 'large'
+      ? `بطاقة تجميع الأوردرات الكبرى (دفعة ${totalPieces} قطعة)`
+      : `بطاقة تجميع أوردرات القطعتين (دفعة ${totalPieces} قطعة)`;
+
+    // Check if running in browser with canvas support
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 886;
+      canvas.height = 1476;
+      const ctx = canvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Outer heavy border
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+
+      // Header Banner (Dark slate, height 160px)
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(6, 6, canvas.width - 12, 160);
+
+      // Header Title
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 36px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText('📦 بطاقة تجهيز المخزن', canvas.width / 2, 60);
+
+      // Header Meta
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 28px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText(`دفعة [ ${totalPieces} ] قطعة  |  [ ${totalOrders} ] أوردرات`, canvas.width / 2, 115);
+
+      // Subtitle banner (height 55px)
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(6, 166, canvas.width - 12, 55);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(6, 166, canvas.width - 12, 55);
+
+      ctx.fillStyle = '#1e293b';
+      ctx.font = 'bold 24px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText(titleSubtitle, canvas.width / 2, 203);
+
+      // Table Header (height 48px)
+      const tableTop = 225;
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillRect(6, tableTop, canvas.width - 12, 48);
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(6, tableTop, canvas.width - 12, 48);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 20px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText('تم', 840, tableTop + 32);
+      ctx.fillText('اسم الموديل واللون والمقاس', 540, tableTop + 32);
+      ctx.fillText('كود SKU', 200, tableTop + 32);
+      ctx.fillText('الكمية', 65, tableTop + 32);
+
+      // Rows
+      let currentY = tableTop + 48;
+      const availableHeight = canvas.height - currentY - 80;
+      const rowCount = Math.max(aggregatedItems.length, 1);
+      const rowHeight = Math.min(68, Math.max(42, Math.floor(availableHeight / rowCount)));
+
+      for (let idx = 0; idx < aggregatedItems.length; idx++) {
+        const it = aggregatedItems[idx];
+        const isEven = idx % 2 === 0;
+
+        ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(6, currentY, canvas.width - 12, rowHeight);
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(6, currentY + rowHeight);
+        ctx.lineTo(canvas.width - 6, currentY + rowHeight);
+        ctx.stroke();
+
+        // Checkbox in Col 1
+        const boxSize = Math.min(28, rowHeight - 16);
+        const boxY = currentY + (rowHeight - boxSize) / 2;
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(825, boxY, boxSize, boxSize);
+
+        // Col 2: Name
+        ctx.fillStyle = '#0f172a';
+        ctx.textAlign = 'right';
+        ctx.font = `bold ${rowHeight < 50 ? 18 : 22}px "Alexandria", "Cairo", sans-serif`;
+        let displayName = it.name || '';
+        if (displayName.length > 38) {
+          displayName = displayName.substring(0, 36) + '...';
+        }
+        ctx.fillText(displayName, 795, currentY + rowHeight * 0.65);
+
+        // Col 3: SKU Pill
+        if (it.sku) {
+          const pillW = 140;
+          const pillH = Math.min(30, rowHeight - 12);
+          const pillX = 130;
+          const pillY = currentY + (rowHeight - pillH) / 2;
+
+          ctx.fillStyle = '#f1f5f9';
+          ctx.beginPath();
+          ctx.roundRect(pillX, pillY, pillW, pillH, 6);
+          ctx.fill();
+          ctx.strokeStyle = '#cbd5e1';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          ctx.fillStyle = '#0284c7';
+          ctx.textAlign = 'center';
+          ctx.font = `bold ${rowHeight < 50 ? 16 : 19}px monospace`;
+          ctx.fillText(it.sku, pillX + pillW / 2, pillY + pillH * 0.72);
+        } else {
+          ctx.fillStyle = '#94a3b8';
+          ctx.textAlign = 'center';
+          ctx.font = 'italic 16px "Alexandria", "Cairo", sans-serif';
+          ctx.fillText('-', 200, currentY + rowHeight * 0.65);
+        }
+
+        // Col 4: Qty badge
+        const qtyW = 60;
+        const qtyH = Math.min(34, rowHeight - 10);
+        const qtyX = 35;
+        const qtyY = currentY + (rowHeight - qtyH) / 2;
+
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(qtyX, qtyY, qtyW, qtyH, 6);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.font = `bold ${rowHeight < 50 ? 20 : 24}px sans-serif`;
+        ctx.fillText(`${it.qty}`, qtyX + qtyW / 2, qtyY + qtyH * 0.75);
+
+        currentY += rowHeight;
+      }
+
+      // Footer
+      const footerY = canvas.height - 55;
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(6, footerY, canvas.width - 12, 48);
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(6, footerY);
+      ctx.lineTo(canvas.width - 6, footerY);
+      ctx.stroke();
+
+      ctx.fillStyle = '#475569';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 20px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText(`إجمالي الأصناف: ${aggregatedItems.length} صنف | إجمالي القطع: ${totalPieces} قطعة | مرتبة بمسار الممرات`, canvas.width / 2, footerY + 32);
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const pngImage = await outDoc.embedPng(dataUrl);
+      const page = outDoc.addPage([212.60, 354.33]);
+      page.drawImage(pngImage, {
+        x: 0,
+        y: 0,
+        width: 212.60,
+        height: 354.33
+      });
+      return page;
+    } else {
+      // Node.js fallback for tests
+      const page = outDoc.addPage([212.60, 354.33]);
+      const { rgb, StandardFonts } = (typeof PDFLib !== 'undefined' ? PDFLib : global.PDFLib);
+      const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
+      const regFont = await outDoc.embedFont(StandardFonts.Helvetica);
+
+      page.drawRectangle({
+        x: 4,
+        y: 4,
+        width: 204.6,
+        height: 346.33,
+        borderWidth: 2,
+        borderColor: rgb(0.1, 0.1, 0.2),
+        color: rgb(1, 1, 1)
+      });
+
+      page.drawRectangle({
+        x: 4,
+        y: 354.33 - 45,
+        width: 204.6,
+        height: 41,
+        color: rgb(0.06, 0.09, 0.16)
+      });
+
+      page.drawText('WAREHOUSE PICK LIST', {
+        x: 35,
+        y: 354.33 - 22,
+        size: 11,
+        font: font,
+        color: rgb(1, 1, 1)
+      });
+
+      page.drawText(`BATCH: ${totalPieces} PCS | ${totalOrders} ORDERS`, {
+        x: 30,
+        y: 354.33 - 38,
+        size: 9,
+        font: font,
+        color: rgb(0.2, 0.7, 0.9)
+      });
+
+      page.drawRectangle({
+        x: 4,
+        y: 354.33 - 62,
+        width: 204.6,
+        height: 16,
+        color: rgb(0.9, 0.92, 0.95)
+      });
+
+      page.drawText('[ ] ITEM / SKU', { x: 10, y: 354.33 - 57, size: 7, font: font, color: rgb(0.1, 0.1, 0.2) });
+      page.drawText('QTY', { x: 185, y: 354.33 - 57, size: 7, font: font, color: rgb(0.1, 0.1, 0.2) });
+
+      let curY = 354.33 - 78;
+      for (const it of aggregatedItems) {
+        if (curY < 30) break;
+        page.drawRectangle({
+          x: 10,
+          y: curY,
+          width: 8,
+          height: 8,
+          borderWidth: 1,
+          borderColor: rgb(0.1, 0.1, 0.1)
+        });
+
+        const label = it.sku ? `SKU: ${it.sku}` : `Item #${aggregatedItems.indexOf(it) + 1} (Walk: ${it.walkIndex})`;
+        page.drawText(label, { x: 23, y: curY + 1, size: 7, font: regFont, color: rgb(0.1, 0.1, 0.2) });
+        page.drawText(`x${it.qty}`, { x: 185, y: curY + 1, size: 8, font: font, color: rgb(0.1, 0.1, 0.2) });
+
+        curY -= 14;
+      }
+
+      return page;
+    }
+  },
+
+  /**
    * Generates final sorted PDF (Pure 1:1 binary copy)
-   * If options.insertBlankSeparators is true, inserts blank pages [212.60, 354.33] between groups.
+   * Auto-Batching Pick Lists & Blank Separators:
+   * 1. Large orders (3+ pieces): Batched <= 30 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
+   * 2. Two-piece orders (2 pieces): Batched <= 10 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
+   * 3. Single-piece orders (1 piece): NO pick lists. Department separation only (Women vs Kids vs Others) with blank separator
    */
   async generateSortedPDF(masterPdfBytes, sortedPages, options = {}, onProgress) {
-    if (typeof PDFLib === 'undefined') {
+    const pdfLibModule = typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null);
+    if (!pdfLibModule) {
       throw new Error('مكتبة pdf-lib غير محملة. يرجى التأكد من اتصال الإنترنت.');
     }
 
@@ -328,42 +620,147 @@ const PDFProcessor = {
       throw new Error('لا توجد صفحات محددة للتصدير.');
     }
 
+    const enableBatchPickLists = options.enableBatchPickLists !== false && options.insertBlankSeparators !== false;
+
     try {
       const safeBuffer = bytes.slice(0);
-      const srcDoc = await PDFLib.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
-      const outDoc = await PDFLib.PDFDocument.create();
+      const srcDoc = await pdfLibModule.PDFDocument.load(safeBuffer, { ignoreEncryption: true });
+      const outDoc = await pdfLibModule.PDFDocument.create();
 
-      const sortedIndices = sortedPages.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
-
-      // Pure 1:1 binary copy - DO NOT call setSize, embedPage, scaleContent or setMediaBox!
-      const copiedPages = await outDoc.copyPages(srcDoc, sortedIndices);
-
-      const total = copiedPages.length;
-      for (let i = 0; i < total; i++) {
-        if (onProgress) {
-          onProgress({
-            current: i + 1,
-            total: total,
-            percent: Math.round(((i + 1) / total) * 100),
-            phase: 'تجهيز صفحات الطباعة (نسخ ثنائي مباشر 1:1)'
-          });
+      if (!enableBatchPickLists) {
+        // Simple direct 1:1 binary copy without batch pick lists or separators
+        const sortedIndices = sortedPages.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
+        const copiedPages = await outDoc.copyPages(srcDoc, sortedIndices);
+        for (let i = 0; i < copiedPages.length; i++) {
+          if (onProgress) {
+            onProgress({
+              current: i + 1,
+              total: copiedPages.length,
+              percent: Math.round(((i + 1) / copiedPages.length) * 100),
+              phase: 'تجهيز صفحات الطباعة (نسخ ثنائي مباشر 1:1)'
+            });
+          }
+          outDoc.addPage(copiedPages[i]);
         }
-        outDoc.addPage(copiedPages[i]);
+        return await outDoc.save();
+      }
 
-        // Blank Separator Logic (صفحة بيضاء فاصلة بين المجموعات)
-        if (options.insertBlankSeparators && i < total - 1) {
-          const curPage = sortedPages[i];
-          const nextPage = sortedPages[i + 1];
-          if (curPage && nextPage) {
-            const rankCur = this.getStrategy1GroupRank(curPage);
-            const rankNext = this.getStrategy1GroupRank(nextPage);
+      // Partition sorted pages into groups
+      const largeOrders = [];
+      const twoPieceOrders = [];
+      const singleWomen = [];
+      const singleKids = [];
+      const singleOthers = [];
+      const unrecognizedOrders = [];
 
-            // Boundary transitions: 1->2, 2->3, 3->4, 4->5
-            if (rankCur >= 1 && rankCur <= 4 && rankNext > rankCur && rankNext <= 5) {
-              outDoc.addPage([212.60, 354.33]);
-            }
+      for (const p of sortedPages) {
+        const group = this.getPieceGroup(p);
+        if (group === 1) {
+          largeOrders.push(p);
+        } else if (group === 2) {
+          twoPieceOrders.push(p);
+        } else if (group === 3) {
+          const dept = this.getDeptRank(p);
+          if (dept === 1) singleWomen.push(p);
+          else if (dept === 2) singleKids.push(p);
+          else singleOthers.push(p);
+        } else {
+          unrecognizedOrders.push(p);
+        }
+      }
+
+      // Helper to copy and add orders in an array
+      const addOrderLabels = async (ordersList) => {
+        if (!ordersList || ordersList.length === 0) return;
+        const indices = ordersList.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
+        const copied = await outDoc.copyPages(srcDoc, indices);
+        for (const cp of copied) {
+          outDoc.addPage(cp);
+        }
+      };
+
+      // 1. Large Orders (3+ pieces): Batched <= 30 pieces
+      if (largeOrders.length > 0) {
+        const largeBatches = [];
+        let curBatch = [];
+        let curPieces = 0;
+
+        for (const order of largeOrders) {
+          const pCount = order.piecesCount || order.totalItemsCount || 1;
+          if (curBatch.length > 0 && curPieces + pCount > 30) {
+            largeBatches.push(curBatch);
+            curBatch = [order];
+            curPieces = pCount;
+          } else {
+            curBatch.push(order);
+            curPieces += pCount;
           }
         }
+        if (curBatch.length > 0) largeBatches.push(curBatch);
+
+        for (const batch of largeBatches) {
+          await addOrderLabels(batch);
+          // Insert Page A: Pick list sheet
+          await this.createPickListSheet(outDoc, batch, 'large');
+          // Insert Page B: 100% Blank separator
+          outDoc.addPage([212.60, 354.33]);
+        }
+      }
+
+      // 2. Two-Piece Orders (2 pieces): Batched <= 10 pieces (every 5 orders = 10 pieces)
+      if (twoPieceOrders.length > 0) {
+        const twoBatches = [];
+        let curBatch2 = [];
+        let curPieces2 = 0;
+
+        for (const order of twoPieceOrders) {
+          const pCount = order.piecesCount || order.totalItemsCount || 2;
+          if (curBatch2.length > 0 && curPieces2 + pCount > 10) {
+            twoBatches.push(curBatch2);
+            curBatch2 = [order];
+            curPieces2 = pCount;
+          } else {
+            curBatch2.push(order);
+            curPieces2 += pCount;
+          }
+        }
+        if (curBatch2.length > 0) twoBatches.push(curBatch2);
+
+        for (const batch of twoBatches) {
+          await addOrderLabels(batch);
+          // Insert Page A: Pick list sheet
+          await this.createPickListSheet(outDoc, batch, 'twopiece');
+          // Insert Page B: 100% Blank separator
+          outDoc.addPage([212.60, 354.33]);
+        }
+      }
+
+      // 3. Single-Piece Orders (1 piece): NO pick lists! Separate departments with blank separator
+      let hasPrecedingSingleGroup = false;
+
+      if (singleWomen.length > 0) {
+        await addOrderLabels(singleWomen);
+        hasPrecedingSingleGroup = true;
+      }
+
+      if (singleKids.length > 0) {
+        if (hasPrecedingSingleGroup) {
+          outDoc.addPage([212.60, 354.33]); // Blank separator between Women and Kids
+        }
+        await addOrderLabels(singleKids);
+        hasPrecedingSingleGroup = true;
+      }
+
+      if (singleOthers.length > 0) {
+        if (hasPrecedingSingleGroup) {
+          outDoc.addPage([212.60, 354.33]); // Blank separator between (Women/Kids) and Others
+        }
+        await addOrderLabels(singleOthers);
+      }
+
+      // 4. Unrecognized Orders (if any)
+      if (unrecognizedOrders.length > 0) {
+        await addOrderLabels(unrecognizedOrders);
       }
 
       return await outDoc.save();

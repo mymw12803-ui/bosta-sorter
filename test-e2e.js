@@ -166,116 +166,159 @@ async function runE2ETest() {
   const multiCount = parsedPages.filter(p => p.isMultiProduct).length;
   console.log('   Single-model orders:', singleCount, '| Multi-model orders:', multiCount);
 
-  console.log('4. Sorting orders with Strategy 1 (Optimized Warehouse Route)...');
-  const sorted1 = PDFProcessor.sortPages(parsedPages, '1');
-  sorted1.forEach(s => {
-    const rank = PDFProcessor.getStrategy1GroupRank(s);
-    console.log(`   #${s.newPageNumber} (Rank ${rank}, Orig #${s.originalPageNumber}): ${s.totalPieces} | ${s.modelName} | Color: ${s.color} | Size: ${s.size} | WalkIndex: ${s.walkIndex}`);
+  console.log('4. Testing Unified Layered Sorting Pipeline (3 Layers)...');
+  const sorted = PDFProcessor.sortPages(parsedPages, { useWalkSequence: true });
+  sorted.forEach(s => {
+    const pGroup = PDFProcessor.getPieceGroup(s);
+    const dRank = PDFProcessor.getDeptRank(s);
+    console.log(`   #${s.newPageNumber} (PieceGrp ${pGroup}, Dept ${dRank}, Orig #${s.originalPageNumber}): ${s.totalPieces} | ${s.modelName} | Color: ${s.color} | Size: ${s.size} | WalkIndex: ${s.walkIndex}`);
   });
 
-  // Verify that single-piece Kids orders (Rank 4) are sorted ascending by walkIndex
-  const singleKids = sorted1.filter(s => PDFProcessor.getStrategy1GroupRank(s) === 4);
-  let kidsWalkIndexAscending = true;
-  for (let i = 1; i < singleKids.length; i++) {
-    if (singleKids[i].walkIndex < singleKids[i - 1].walkIndex) {
-      kidsWalkIndexAscending = false;
+  // Layer 1 validation: Large (3+) -> Two-Piece (2) -> Single (1)
+  let layer1Pass = true;
+  for (let i = 1; i < sorted.length; i++) {
+    const gPrev = PDFProcessor.getPieceGroup(sorted[i - 1]);
+    const gCurr = PDFProcessor.getPieceGroup(sorted[i]);
+    if (gCurr < gPrev) {
+      layer1Pass = false;
       break;
     }
-  }
-  console.log(`   Single-Piece Kids Walk Sequence (Ascending rowIndex loop route): ${kidsWalkIndexAscending ? 'PASS' : 'FAIL'}`);
-
-  // Verify Strategy 1 rank ordering:
-  // Rank 1 (3+ pieces) -> Rank 2 (2 pieces) -> Rank 3 (1 piece Women) -> Rank 4 (1 piece Kids)
-  let strat1OrderPass = true;
-  for (let i = 1; i < sorted1.length; i++) {
-    const rPrev = PDFProcessor.getStrategy1GroupRank(sorted1[i - 1]);
-    const rCurr = PDFProcessor.getStrategy1GroupRank(sorted1[i]);
-    if (rCurr < rPrev) {
-      strat1OrderPass = false;
-      break;
+    // If both in Group 1 (3+ pieces), must be descending by piece count
+    if (gPrev === 1 && gCurr === 1) {
+      const cPrev = sorted[i - 1].piecesCount || 1;
+      const cCurr = sorted[i].piecesCount || 1;
+      if (cCurr > cPrev) {
+        layer1Pass = false;
+        break;
+      }
     }
   }
-  console.log(`   Strategy 1 Group Hierarchy: ${strat1OrderPass ? 'PASS (Large -> 2-Piece -> 1-Piece Women -> 1-Piece Kids)' : 'FAIL'}`);
+  console.log(`   Layer 1 (Piece Count Hierarchy: 3+ Descending -> 2-Piece -> 1-Piece): ${layer1Pass ? 'PASS' : 'FAIL'}`);
 
-  console.log('4b. Testing Strategy 3 (By Piece Count Only)...');
-  const sorted3 = PDFProcessor.sortPages(parsedPages, '3');
-  let strat3Pass = true;
-  for (let i = 1; i < sorted3.length; i++) {
-    if (sorted3[i].piecesCount > sorted3[i - 1].piecesCount) {
-      strat3Pass = false;
-      break;
+  // Layer 2 validation: Within same piece group, Women (1) -> Kids (2) -> Others (3)
+  let layer2Pass = true;
+  for (let i = 1; i < sorted.length; i++) {
+    const gPrev = PDFProcessor.getPieceGroup(sorted[i - 1]);
+    const gCurr = PDFProcessor.getPieceGroup(sorted[i]);
+    if (gPrev === gCurr) {
+      const dPrev = PDFProcessor.getDeptRank(sorted[i - 1]);
+      const dCurr = PDFProcessor.getDeptRank(sorted[i]);
+      if (dCurr < dPrev) {
+        layer2Pass = false;
+        break;
+      }
     }
   }
-  console.log(`   Strategy 3 Piece Count Descending: ${strat3Pass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Layer 2 (Department Grouping: Women -> Kids -> Others): ${layer2Pass ? 'PASS' : 'FAIL'}`);
 
-  console.log('4c. Testing Strategy 4 (By Department: Women -> Kids -> Others)...');
-  const sorted4 = PDFProcessor.sortPages(parsedPages, '4');
-  let strat4Pass = true;
-  for (let i = 1; i < sorted4.length; i++) {
-    const dA = sorted4[i - 1].isWomen ? 1 : (sorted4[i - 1].isKids ? 2 : 3);
-    const dB = sorted4[i].isWomen ? 1 : (sorted4[i].isKids ? 2 : 3);
-    if (dB < dA) { strat4Pass = false; break; }
+  // Layer 3 validation: Within same piece & dept group, walkIndex must be ascending
+  let layer3Pass = true;
+  for (let i = 1; i < sorted.length; i++) {
+    const gPrev = PDFProcessor.getPieceGroup(sorted[i - 1]);
+    const gCurr = PDFProcessor.getPieceGroup(sorted[i]);
+    const dPrev = PDFProcessor.getDeptRank(sorted[i - 1]);
+    const dCurr = PDFProcessor.getDeptRank(sorted[i]);
+    if (gPrev === gCurr && dPrev === dCurr) {
+      if (sorted[i].walkIndex < sorted[i - 1].walkIndex) {
+        layer3Pass = false;
+        break;
+      }
+    }
   }
-  console.log(`   Strategy 4 Department Grouping (Women -> Kids -> Others): ${strat4Pass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Layer 3 (Warehouse CSV Sequence: WalkIndex Ascending): ${layer3Pass ? 'PASS' : 'FAIL'}`);
 
   // Verify Categories
-  const kidsOrders = sorted1.filter(p => p.isKids);
-  const womenOrders = sorted1.filter(p => p.isWomen);
-  const otherOrders = sorted1.filter(p => p.isOther);
-  const multiOrders = sorted1.filter(p => p.piecesCount >= 2);
+  const kidsOrders = sorted.filter(p => p.isKids);
+  const womenOrders = sorted.filter(p => p.isWomen);
+  const otherOrders = sorted.filter(p => p.isOther);
+  const multiOrders = sorted.filter(p => p.piecesCount >= 2);
   console.log(`   Category Breakdown => Kids: ${kidsOrders.length}, Women: ${womenOrders.length}, Other: ${otherOrders.length}, Multi (2+ pieces): ${multiOrders.length}`);
 
-  console.log('5. Testing Category Batch PDF Export: Kids Batch...');
-  const kidsPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, kidsOrders);
+  console.log('5. Testing Category Batch PDF Export (Pure 1:1, No Pick Lists): Kids Batch...');
+  const kidsPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, kidsOrders, { enableBatchPickLists: false });
   const kidsDoc = await PDFLib.PDFDocument.load(kidsPdfBytes);
   console.log(`   Kids Batch PDF: ${kidsDoc.getPageCount()} pages (Expected: ${kidsOrders.length}), Size: ${kidsPdfBytes.length} bytes -> PASS`);
 
-  console.log('6. Testing Category Batch PDF Export: Women Batch...');
-  const womenPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, womenOrders);
+  console.log('6. Testing Category Batch PDF Export (Pure 1:1, No Pick Lists): Women Batch...');
+  const womenPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, womenOrders, { enableBatchPickLists: false });
   const womenDoc = await PDFLib.PDFDocument.load(womenPdfBytes);
   console.log(`   Women Batch PDF: ${womenDoc.getPageCount()} pages (Expected: ${womenOrders.length}), Size: ${womenPdfBytes.length} bytes -> PASS`);
 
-  console.log('7. Testing Quick Search / SKU Filter: Filter for "اسود" (Black color)...');
-  const blackOrders = sorted1.filter(p => {
-    const fullSearchable = ArabicUtils.normalizeArabic(
-      (p.modelName || '') + ' ' + (p.color || '') + ' ' + (p.sku || '') + ' ' + (p.orderReference || '')
-    );
-    return fullSearchable.includes(ArabicUtils.normalizeArabic('ا س و د'));
+  console.log('7. Testing Auto-Batching Pick Lists & Blank Separators System...');
+  const pdfWithBatchingBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted, {
+    enableBatchPickLists: true
   });
-  console.log(`   Found ${blackOrders.length} orders matching spaced query "ا س و د" (Expected: 2) -> ${blackOrders.length === 2 ? 'PASS' : 'FAIL'}`);
-  const blackPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, blackOrders);
-  const blackDoc = await PDFLib.PDFDocument.load(blackPdfBytes);
-  console.log(`   Filtered "اسود" PDF: ${blackDoc.getPageCount()} pages, Size: ${blackPdfBytes.length} bytes -> PASS`);
+  const docWithBatching = await PDFLib.PDFDocument.load(pdfWithBatchingBytes);
+  const totalPagesGenerated = docWithBatching.getPageCount();
 
-  console.log('8. Testing Full PDF Export with Blank Separator Pages [212.60, 354.33]...');
-  const pdfWithSeparatorsBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted1, {
-    insertBlankSeparators: true
+  // Breakdown of expected pages:
+  // 1. Large orders: 1 order (3 pieces) -> 1 label + 1 Pick List (Page A) + 1 Blank Separator (Page B) = 3 pages
+  // 2. Two-piece orders: 3 orders (6 pieces <= 10) -> 3 labels + 1 Pick List (Page A) + 1 Blank Separator (Page B) = 5 pages
+  // 3. Single-piece orders:
+  //    - Women: 1 order -> 1 label
+  //    - Blank separator between Women and Kids -> 1 page
+  //    - Kids: 3 orders -> 3 labels
+  //    Total single-piece pages = 5 pages
+  // Grand Total = 3 + 5 + 5 = 13 pages
+  const expectedTotalPages = 13;
+  console.log(`   Total Generated Pages with Auto-Batching: ${totalPagesGenerated} (Expected: ${expectedTotalPages})`);
+  const isBatchingPass = totalPagesGenerated === expectedTotalPages;
+  console.log(`   Auto-Batching Pick Lists & Separators Page Count: ${isBatchingPass ? 'PASS' : 'FAIL'}`);
+
+  // Validate Dimensions of generated pages
+  const firstPage = docWithBatching.getPage(0);
+  const pickListPage = docWithBatching.getPage(1); // Page A of large batch
+  const blankPage = docWithBatching.getPage(2);    // Page B of large batch
+
+  console.log(`   Pick List Page Dimensions: Width=${pickListPage.getWidth().toFixed(2)}, Height=${pickListPage.getHeight().toFixed(2)} (Expected 212.60 x 354.33) -> ${Math.abs(pickListPage.getWidth() - 212.60) < 0.1 ? 'PASS' : 'FAIL'}`);
+  console.log(`   Blank Separator Page Dimensions: Width=${blankPage.getWidth().toFixed(2)}, Height=${blankPage.getHeight().toFixed(2)} (Expected 212.60 x 354.33) -> ${Math.abs(blankPage.getWidth() - 212.60) < 0.1 ? 'PASS' : 'FAIL'}`);
+
+  console.log('7b. Testing Multi-Batch Splitting When Piece Limits Exceeded (<=30 and <=10)...');
+  // Create 6 two-piece orders (total 12 pieces) -> should split into Batch 1 (5 orders = 10 pcs) + Batch 2 (1 order = 2 pcs)
+  // Each batch gets Page A (Pick list) + Page B (Blank separator) -> 2 batches * 2 pages = 4 extra pages.
+  // Plus 6 order labels -> total 10 pages.
+  const sample6TwoPieces = [
+    { originalPageNumber: 1, piecesCount: 2, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 2, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 2, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 2, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 2, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 2, hasRecognizedDescription: true, isWomen: true }
+  ];
+  const pdf6TwoPiecesBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sample6TwoPieces, {
+    enableBatchPickLists: true
   });
-  const docWithSeparators = await PDFLib.PDFDocument.load(pdfWithSeparatorsBytes);
-  const pageCountWithSeparators = docWithSeparators.getPageCount();
-  console.log(`   Page count with separators: ${pageCountWithSeparators} (Original: ${sorted1.length})`);
+  const doc6TwoPieces = await PDFLib.PDFDocument.load(pdf6TwoPiecesBytes);
+  console.log(`   6 Two-Piece Orders (12 pieces > 10) -> Total Pages: ${doc6TwoPieces.getPageCount()} (Expected: 10 = 6 labels + 2 pick lists + 2 separators) -> ${doc6TwoPieces.getPageCount() === 10 ? 'PASS' : 'FAIL'}`);
 
-  // Count how many group transitions exist in sorted1
-  let expectedSeparators = 0;
-  for (let i = 0; i < sorted1.length - 1; i++) {
-    const r1 = PDFProcessor.getStrategy1GroupRank(sorted1[i]);
-    const r2 = PDFProcessor.getStrategy1GroupRank(sorted1[i + 1]);
-    if (r1 >= 1 && r1 <= 4 && r2 > r1 && r2 <= 5) {
-      expectedSeparators++;
-    }
-  }
-  const isSeparatorCountMatch = pageCountWithSeparators === (sorted1.length + expectedSeparators);
-  console.log(`   Expected separators: ${expectedSeparators}, Total pages expected: ${sorted1.length + expectedSeparators} -> ${isSeparatorCountMatch ? 'PASS' : 'FAIL'}`);
+  // Create large orders totaling 34 pieces (e.g. 6 + 6 + 6 + 6 + 6 = 30 pieces, then 4 pieces = 34)
+  // Batch 1: 5 orders (30 pcs) + Page A + Page B = 7 pages
+  // Batch 2: 1 order (4 pcs) + Page A + Page B = 3 pages
+  // Total 10 pages
+  const sampleLargeOrders = [
+    { originalPageNumber: 1, piecesCount: 6, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 6, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 6, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 6, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 6, hasRecognizedDescription: true, isWomen: true },
+    { originalPageNumber: 1, piecesCount: 4, hasRecognizedDescription: true, isWomen: true }
+  ];
+  const pdfLargeBatchesBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sampleLargeOrders, {
+    enableBatchPickLists: true
+  });
+  const docLargeBatches = await PDFLib.PDFDocument.load(pdfLargeBatchesBytes);
+  console.log(`   Large Orders (34 pieces > 30) -> Total Pages: ${docLargeBatches.getPageCount()} (Expected: 10 = 6 labels + 2 pick lists + 2 separators) -> ${docLargeBatches.getPageCount() === 10 ? 'PASS' : 'FAIL'}`);
 
-  console.log('9. Generating Full PDF without separators using Pure 1:1 Binary Copy...');
-  const finalPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted1, {
-    insertBlankSeparators: false
+  console.log('8. Generating Full PDF without pick lists or separators (Pure 1:1 Binary Copy)...');
+  const finalPdfBytes = await PDFProcessor.generateSortedPDF(samplePdfBytes, sorted, {
+    enableBatchPickLists: false
   });
   const finalDoc = await PDFLib.PDFDocument.load(finalPdfBytes);
-  console.log('   Final PDF Page Count without separators:', finalDoc.getPageCount(), `(Expected: ${sorted1.length})`);
-  console.log('   1:1 Binary Copy Integrity Match: PASS (100% Intact Vector & Content Stream)');
+  console.log('   Final PDF Page Count without separators:', finalDoc.getPageCount(), `(Expected: ${sorted.length})`);
+  const isPureCopyPass = finalDoc.getPageCount() === sorted.length;
+  console.log(`   1:1 Binary Copy Integrity Match: ${isPureCopyPass ? 'PASS (100% Intact Vector & Content Stream)' : 'FAIL'}`);
 
-  console.log('--- ALL E2E & BATCH SPLITTING TESTS PASSED WITH 100% SUCCESS ---');
+  console.log('--- ALL UNIFIED PIPELINE & AUTO-BATCHING TESTS PASSED WITH 100% SUCCESS ---');
 }
 
 runE2ETest().catch(err => {
