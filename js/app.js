@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pdfFileInfo: document.getElementById('pdf-file-info'),
     pdfFileName: document.getElementById('pdf-file-name'),
     pdfFileSize: document.getElementById('pdf-file-size'),
+    removePdfBtn: document.getElementById('remove-pdf-btn'),
     // Custom Filename Input (Feature 3)
     customFilenameInput: document.getElementById('custom-filename-input'),
 
@@ -270,6 +271,8 @@ document.addEventListener('DOMContentLoaded', () => {
    * Setup Dropzone drag and drop handlers
    */
   function setupDropzone(dropzone, input, onFileSelect) {
+    if (!dropzone || !input) return;
+
     ['dragenter', 'dragover'].forEach(eventName => {
       dropzone.addEventListener(eventName, (e) => {
         e.preventDefault();
@@ -294,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     dropzone.addEventListener('click', (e) => {
-      if (e.target.closest('#remove-pdf-btn') || e.target.closest('#remove-inventory-btn')) return;
+      if (e.target && e.target.closest && (e.target.closest('#remove-pdf-btn') || e.target.closest('#remove-inventory-btn'))) return;
       input.click();
     });
 
@@ -391,31 +394,41 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Remove Handlers
-  elements.removePdfBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    state.pdfFile = null;
-    state.pdfArrayBuffer = null;
-    elements.pdfInput.value = '';
-    elements.pdfFileInfo.classList.add('hidden');
-    elements.pdfDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
-    elements.processBtn.disabled = true;
-    hideResults();
-  });
+  if (elements.removePdfBtn) {
+    elements.removePdfBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.pdfFile = null;
+      state.pdfArrayBuffer = null;
+      if (elements.pdfInput) elements.pdfInput.value = '';
+      if (elements.pdfFileInfo) elements.pdfFileInfo.classList.add('hidden');
+      if (elements.pdfDropzone) {
+        const prompt = elements.pdfDropzone.querySelector('.dropzone-prompt');
+        if (prompt) prompt.classList.remove('hidden');
+      }
+      if (elements.processBtn) elements.processBtn.disabled = true;
+      hideResults();
+    });
+  }
 
-  elements.removeInventoryBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    state.inventoryFile = null;
-    state.inventoryArrayBuffer = null;
-    InventoryParser.reset();
-    elements.inventoryInput.value = '';
-    elements.inventoryFileInfo.classList.add('hidden');
-    elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
-    if (elements.inventoryStatusPill) {
-      elements.inventoryStatusPill.textContent = 'اختياري';
-      elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
-    }
-    showToast('تمت إزالة ملف المخزون.', 'info');
-  });
+  if (elements.removeInventoryBtn) {
+    elements.removeInventoryBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.inventoryFile = null;
+      state.inventoryArrayBuffer = null;
+      InventoryParser.reset();
+      if (elements.inventoryInput) elements.inventoryInput.value = '';
+      if (elements.inventoryFileInfo) elements.inventoryFileInfo.classList.add('hidden');
+      if (elements.inventoryDropzone) {
+        const prompt = elements.inventoryDropzone.querySelector('.dropzone-prompt');
+        if (prompt) prompt.classList.remove('hidden');
+      }
+      if (elements.inventoryStatusPill) {
+        elements.inventoryStatusPill.textContent = 'اختياري';
+        elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
+      }
+      showToast('تمت إزالة ملف المخزون.', 'info');
+    });
+  }
 
   // Setup dropzones
   setupDropzone(elements.pdfDropzone, elements.pdfInput, handlePdfFile);
@@ -685,7 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const defaultFilename = `بوالص_بوسطة_مرتبة${filterPart}_${today}.pdf`;
     elements.customFilenameInput.placeholder = defaultFilename;
-    if (!elements.customFilenameInput.dataset.userEdited) {
+    if (!elements.customFilenameInput.dataset || !elements.customFilenameInput.dataset.userEdited) {
       elements.customFilenameInput.value = defaultFilename;
     }
   }
@@ -693,7 +706,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (elements.customFilenameInput) {
     updateDefaultFilename();
     elements.customFilenameInput.addEventListener('input', () => {
-      elements.customFilenameInput.dataset.userEdited = 'true';
+      if (elements.customFilenameInput.dataset) {
+        elements.customFilenameInput.dataset.userEdited = 'true';
+      }
       try {
         localStorage.setItem('bosta_custom_filename', elements.customFilenameInput.value);
       } catch (e) {}
@@ -1550,10 +1565,12 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * Search Input Handler
    */
-  elements.searchInput.addEventListener('input', (e) => {
-    state.searchQuery = e.target.value;
-    renderTable();
-  });
+  if (elements.searchInput) {
+    elements.searchInput.addEventListener('input', (e) => {
+      state.searchQuery = e.target.value;
+      renderTable();
+    });
+  }
 
   /**
    * Filter Tabs Handler
@@ -1801,15 +1818,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  elements.closeModalBtn.addEventListener('click', () => {
-    elements.detailModal.classList.add('hidden');
-  });
+  if (elements.closeModalBtn) {
+    elements.closeModalBtn.addEventListener('click', () => {
+      if (elements.detailModal) elements.detailModal.classList.add('hidden');
+    });
+  }
 
-  elements.detailModal.addEventListener('click', (e) => {
-    if (e.target === elements.detailModal) {
-      elements.detailModal.classList.add('hidden');
-    }
-  });
+  if (elements.detailModal) {
+    elements.detailModal.addEventListener('click', (e) => {
+      if (e.target === elements.detailModal) {
+        elements.detailModal.classList.add('hidden');
+      }
+    });
+  }
 
   /**
    * Exact bulletproof download function
@@ -1901,14 +1922,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Top Download Bar:
   // Red Button: "تحميل كافة البوليصات مرتبة (101 بوليصة)" -> Calls downloadPdfBatch with separator options
-  elements.downloadTopBtn.addEventListener('click', async () => {
-    const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
-    await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
-  });
-  elements.downloadStickyBtn.addEventListener('click', async () => {
-    const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
-    await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
-  });
+  if (elements.downloadTopBtn) {
+    elements.downloadTopBtn.addEventListener('click', async () => {
+      const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
+      await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
+    });
+  }
+  if (elements.downloadStickyBtn) {
+    elements.downloadStickyBtn.addEventListener('click', async () => {
+      const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
+      await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
+    });
+  }
 
   // Dynamic Filter Download Button: "تحميل نتائج الفلتر الحالي (X بوليصة)" -> Downloads only currently filtered rows
   if (elements.downloadFilteredBtn) {
@@ -1963,36 +1988,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  elements.processBtn.addEventListener('click', processLabels);
+  if (elements.processBtn) {
+    elements.processBtn.addEventListener('click', processLabels);
+  }
 
   /**
    * Reset All
    */
-  elements.resetBtn.addEventListener('click', () => {
-    state.pdfFile = null;
-    state.pdfArrayBuffer = null;
-    state.inventoryFile = null;
-    state.inventoryArrayBuffer = null;
-    state.extractedPages = [];
-    state.sortedPages = [];
-    InventoryParser.init();
-    updateCatalogUI();
+  if (elements.resetBtn) {
+    elements.resetBtn.addEventListener('click', () => {
+      state.pdfFile = null;
+      state.pdfArrayBuffer = null;
+      state.inventoryFile = null;
+      state.inventoryArrayBuffer = null;
+      state.extractedPages = [];
+      state.sortedPages = [];
+      InventoryParser.init();
+      updateCatalogUI();
 
-    elements.pdfInput.value = '';
-    elements.inventoryInput.value = '';
-    elements.pdfFileInfo.classList.add('hidden');
-    elements.inventoryFileInfo.classList.add('hidden');
-    if (elements.inventoryStatusPill) {
-      elements.inventoryStatusPill.textContent = `معتمد (${InventoryParser.inventoryItems.length} صنفاً)`;
-      elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
-    }
-    elements.pdfDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
-    elements.inventoryDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');
-    elements.processBtn.disabled = true;
+      if (elements.pdfInput) elements.pdfInput.value = '';
+      if (elements.inventoryInput) elements.inventoryInput.value = '';
+      if (elements.pdfFileInfo) elements.pdfFileInfo.classList.add('hidden');
+      if (elements.inventoryFileInfo) elements.inventoryFileInfo.classList.add('hidden');
+      if (elements.inventoryStatusPill) {
+        elements.inventoryStatusPill.textContent = `معتمد (${InventoryParser.inventoryItems.length} صنفاً)`;
+        elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
+      }
+      if (elements.pdfDropzone) {
+        const p1 = elements.pdfDropzone.querySelector('.dropzone-prompt');
+        if (p1) p1.classList.remove('hidden');
+      }
+      if (elements.inventoryDropzone) {
+        const p2 = elements.inventoryDropzone.querySelector('.dropzone-prompt');
+        if (p2) p2.classList.remove('hidden');
+      }
+      if (elements.processBtn) elements.processBtn.disabled = true;
 
-    hideResults();
-    showToast('تمت إعادة ضبط النموذج بنجاح.', 'info');
-  });
+      hideResults();
+      showToast('تمت إعادة ضبط النموذج بنجاح.', 'info');
+    });
+  }
 
   function hideResults() {
     elements.resultsSection.classList.add('hidden');
