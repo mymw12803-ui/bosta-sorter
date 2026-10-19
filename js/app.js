@@ -8,6 +8,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const state = {
     pdfFile: null,
     pdfArrayBuffer: null,
+    uploadedPdfFiles: [], // Array of { file, name, size, buffer }
+    mergeEnabled: true,
+    thermalResizeEnabled: true,
+    smartSortEnabled: true,
+    blankSeparatorsEnabled: true,
+    manifestSheetEnabled: true,
     inventoryFile: null,
     inventoryArrayBuffer: null,
     extractedPages: [],
@@ -17,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     insertBlankSeparators: true,
     resizeEnabled: true,
     keepAspectRatio: true,
+    labelFitMode: 'safe_fit', // 'safe_fit' (Option A - Safe Fit with Margins) or 'fill_width' (Option B - Fill Width 100%)
     widthMm: 75,
     heightMm: 125,
     activeFilter: 'all', // 'all', 'single', 'multi', 'unknown'
@@ -31,6 +38,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // DOM Elements
   const elements = {
+    // Pipeline Options Bar Toggles
+    pipelineMergeToggle: document.getElementById('pipeline-merge-toggle'),
+    pipelineResizeToggle: document.getElementById('pipeline-resize-toggle'),
+    pipelineSortToggle: document.getElementById('pipeline-sort-toggle'),
+    pipelineSeparatorsToggle: document.getElementById('pipeline-separators-toggle'),
+    pipelineManifestToggle: document.getElementById('pipeline-manifest-toggle'),
+
     // Dropzones & Inputs
     pdfDropzone: document.getElementById('pdf-dropzone'),
     pdfInput: document.getElementById('pdf-input'),
@@ -38,6 +52,9 @@ document.addEventListener('DOMContentLoaded', () => {
     pdfFileName: document.getElementById('pdf-file-name'),
     pdfFileSize: document.getElementById('pdf-file-size'),
     removePdfBtn: document.getElementById('remove-pdf-btn'),
+    addMorePdfBtn: document.getElementById('add-more-pdf-btn'),
+    pdfFilesChips: document.getElementById('pdf-files-chips'),
+
     // Custom Filename Input (Feature 3)
     customFilenameInput: document.getElementById('custom-filename-input'),
 
@@ -109,6 +126,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Resize controls
     resizeCheckbox: document.getElementById('resize-checkbox'),
     resizeOptionsContainer: document.getElementById('resize-options-container'),
+    fitModeSafeRadio: document.getElementById('fit-mode-safe'),
+    fitModeFillRadio: document.getElementById('fit-mode-fill'),
     aspectRatioToggle: document.getElementById('aspect-ratio-toggle'),
     widthInput: document.getElementById('width-input'),
     heightInput: document.getElementById('height-input'),
@@ -270,7 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * Setup Dropzone drag and drop handlers
    */
-  function setupDropzone(dropzone, input, onFileSelect) {
+  function setupDropzone(dropzone, input, onFilesSelect) {
     if (!dropzone || !input) return;
 
     ['dragenter', 'dragover'].forEach(eventName => {
@@ -292,46 +311,156 @@ document.addEventListener('DOMContentLoaded', () => {
     dropzone.addEventListener('drop', (e) => {
       const files = e.dataTransfer.files;
       if (files && files.length > 0) {
-        onFileSelect(files[0]);
+        if (input.multiple) {
+          onFilesSelect(Array.from(files));
+        } else {
+          onFilesSelect(files[0]);
+        }
       }
     });
 
     dropzone.addEventListener('click', (e) => {
-      if (e.target && e.target.closest && (e.target.closest('#remove-pdf-btn') || e.target.closest('#remove-inventory-btn'))) return;
+      if (e.target && e.target.closest && (
+        e.target.closest('#remove-pdf-btn') || 
+        e.target.closest('#remove-inventory-btn') ||
+        e.target.closest('#add-more-pdf-btn') ||
+        e.target.closest('[data-remove-chip]')
+      )) return;
       input.click();
     });
 
     input.addEventListener('change', (e) => {
       if (e.target.files && e.target.files.length > 0) {
-        onFileSelect(e.target.files[0]);
+        if (input.multiple) {
+          onFilesSelect(Array.from(e.target.files));
+        } else {
+          onFilesSelect(e.target.files[0]);
+        }
       }
     });
   }
 
   /**
-   * Handle PDF File Selection
+   * Render Multi-PDF chips under dropzone
    */
-  async function handlePdfFile(file) {
-    if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
+  function renderPdfFilesChips() {
+    if (!elements.pdfFilesChips) return;
+    if (state.uploadedPdfFiles.length === 0) {
+      elements.pdfFilesChips.innerHTML = '';
+      elements.pdfFilesChips.classList.add('hidden');
+      if (elements.pdfFileInfo) elements.pdfFileInfo.classList.add('hidden');
+      const prompt = elements.pdfDropzone ? elements.pdfDropzone.querySelector('.dropzone-prompt') : null;
+      if (prompt) prompt.classList.remove('hidden');
+      if (elements.processBtn) elements.processBtn.disabled = true;
+      return;
+    }
+
+    if (elements.pdfDropzone) {
+      const prompt = elements.pdfDropzone.querySelector('.dropzone-prompt');
+      if (prompt) prompt.classList.add('hidden');
+    }
+    if (elements.pdfFileInfo) elements.pdfFileInfo.classList.remove('hidden');
+    elements.pdfFilesChips.classList.remove('hidden');
+
+    const totalBytes = state.uploadedPdfFiles.reduce((acc, f) => acc + f.size, 0);
+    if (elements.pdfFileName) {
+      elements.pdfFileName.textContent = state.uploadedPdfFiles.length === 1
+        ? state.uploadedPdfFiles[0].name
+        : `${state.uploadedPdfFiles.length} ملفات PDF محددة`;
+    }
+    if (elements.pdfFileSize) {
+      elements.pdfFileSize.textContent = formatFileSize(totalBytes);
+    }
+
+    elements.pdfFilesChips.innerHTML = state.uploadedPdfFiles.map((f, idx) => `
+      <div class="file-chip flex items-center justify-between gap-2 p-2 bg-slate-900/80 rounded-lg border border-slate-700/60 text-xs">
+        <div class="flex items-center gap-2 truncate">
+          <span class="text-rose-400 font-bold">📄</span>
+          <span class="text-slate-200 truncate font-medium max-w-[200px]" title="${f.name}">${f.name}</span>
+          <span class="text-[10px] text-slate-400">(${formatFileSize(f.size)})</span>
+        </div>
+        <button type="button" data-remove-chip="${idx}" class="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition" title="حذف هذا الملف">
+          <svg class="w-3.5 h-3.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    `).join('');
+
+    // Attach remove chip listeners
+    elements.pdfFilesChips.querySelectorAll('[data-remove-chip]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.removeChip, 10);
+        state.uploadedPdfFiles.splice(idx, 1);
+        if (state.uploadedPdfFiles.length === 0) {
+          state.pdfFile = null;
+          state.pdfArrayBuffer = null;
+          state.masterPdfBytes = null;
+          window.rawUntouchedPdfBytes = null;
+        } else if (state.uploadedPdfFiles.length === 1) {
+          state.pdfFile = state.uploadedPdfFiles[0].file;
+          state.pdfFileName = state.uploadedPdfFiles[0].name;
+          state.pdfArrayBuffer = state.uploadedPdfFiles[0].buffer.slice(0);
+          state.masterPdfBytes = new Uint8Array(state.uploadedPdfFiles[0].buffer);
+          window.rawUntouchedPdfBytes = state.masterPdfBytes;
+        }
+        renderPdfFilesChips();
+      });
+    });
+  }
+
+  /**
+   * Handle Multiple PDF Files Selection
+   */
+  async function handlePdfFiles(files, append = false) {
+    const list = Array.isArray(files) ? files : [files];
+    const validFiles = list.filter(f => f && f.name && f.name.toLowerCase().endsWith('.pdf'));
+
+    if (validFiles.length === 0) {
       showToast('يرجى اختيار ملف PDF لبوليصات شحن بوسطة صالح.', 'error');
       return;
     }
 
-    state.pdfFile = file;
-    state.pdfFileName = file.name;
-    const arrayBuffer = await file.arrayBuffer();
-    // Keep clean untouched Uint8Array copy as specified
-    window.rawUntouchedPdfBytes = new Uint8Array(arrayBuffer);
-    state.masterPdfBytes = window.rawUntouchedPdfBytes;
-    state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
+    if (!append) {
+      state.uploadedPdfFiles = [];
+    }
 
-    elements.pdfFileName.textContent = file.name;
-    elements.pdfFileSize.textContent = formatFileSize(file.size);
-    elements.pdfFileInfo.classList.remove('hidden');
-    elements.pdfDropzone.querySelector('.dropzone-prompt').classList.add('hidden');
+    for (const file of validFiles) {
+      const exists = state.uploadedPdfFiles.some(item => item.name === file.name && item.size === file.size);
+      if (!exists) {
+        const arrayBuffer = await file.arrayBuffer();
+        state.uploadedPdfFiles.push({
+          file,
+          name: file.name,
+          size: file.size,
+          buffer: arrayBuffer
+        });
+      }
+    }
 
+    if (state.uploadedPdfFiles.length === 1) {
+      state.pdfFile = state.uploadedPdfFiles[0].file;
+      state.pdfFileName = state.uploadedPdfFiles[0].name;
+      window.rawUntouchedPdfBytes = new Uint8Array(state.uploadedPdfFiles[0].buffer);
+      state.masterPdfBytes = window.rawUntouchedPdfBytes;
+      state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
+    } else if (state.uploadedPdfFiles.length > 1) {
+      state.pdfFile = state.uploadedPdfFiles[0].file;
+      state.pdfFileName = `بوالص_مدمجة_${state.uploadedPdfFiles.length}_ملفات.pdf`;
+      state.pdfArrayBuffer = state.uploadedPdfFiles[0].buffer.slice(0);
+      state.masterPdfBytes = new Uint8Array(state.uploadedPdfFiles[0].buffer);
+      window.rawUntouchedPdfBytes = state.masterPdfBytes;
+    }
+
+    renderPdfFilesChips();
     elements.processBtn.disabled = false;
-    showToast(`تم تحميل ملف البوليصات: ${file.name}`, 'success');
+    showToast(`تم تجهيز ${state.uploadedPdfFiles.length} ملف PDF لبوليصات الشحن.`, 'success');
+  }
+
+  /**
+   * Handle Single PDF File Selection (Compatibility)
+   */
+  async function handlePdfFile(file) {
+    await handlePdfFiles([file], false);
   }
 
   /**
@@ -399,14 +528,24 @@ document.addEventListener('DOMContentLoaded', () => {
       e.stopPropagation();
       state.pdfFile = null;
       state.pdfArrayBuffer = null;
+      state.masterPdfBytes = null;
+      window.rawUntouchedPdfBytes = null;
+      state.uploadedPdfFiles = [];
+      renderPdfFilesChips();
       if (elements.pdfInput) elements.pdfInput.value = '';
-      if (elements.pdfFileInfo) elements.pdfFileInfo.classList.add('hidden');
-      if (elements.pdfDropzone) {
-        const prompt = elements.pdfDropzone.querySelector('.dropzone-prompt');
-        if (prompt) prompt.classList.remove('hidden');
-      }
       if (elements.processBtn) elements.processBtn.disabled = true;
       hideResults();
+      showToast('تمت إزالة كافة ملفات الـ PDF المحددة.', 'info');
+    });
+  }
+
+  if (elements.addMorePdfBtn) {
+    elements.addMorePdfBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (elements.pdfInput) {
+        elements.pdfInput.value = '';
+        elements.pdfInput.click();
+      }
     });
   }
 
@@ -431,7 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Setup dropzones
-  setupDropzone(elements.pdfDropzone, elements.pdfInput, handlePdfFile);
+  setupDropzone(elements.pdfDropzone, elements.pdfInput, (files) => handlePdfFiles(files, state.uploadedPdfFiles.length > 0));
   setupDropzone(elements.inventoryDropzone, elements.inventoryInput, handleInventoryFile);
 
   // ==========================================
@@ -1040,6 +1179,37 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load Persisted User Preferences (localStorage)
   function loadPersistedPreferences() {
     try {
+      // Pipeline Options Bar Toggles
+      const savedMerge = localStorage.getItem('bosta_pipeline_merge');
+      if (savedMerge !== null) {
+        state.mergeEnabled = savedMerge === 'true';
+        if (elements.pipelineMergeToggle) elements.pipelineMergeToggle.checked = state.mergeEnabled;
+      }
+
+      const savedResizePipe = localStorage.getItem('bosta_pipeline_resize');
+      if (savedResizePipe !== null) {
+        state.thermalResizeEnabled = savedResizePipe === 'true';
+        if (elements.pipelineResizeToggle) elements.pipelineResizeToggle.checked = state.thermalResizeEnabled;
+      }
+
+      const savedSortPipe = localStorage.getItem('bosta_pipeline_sort');
+      if (savedSortPipe !== null) {
+        state.smartSortEnabled = savedSortPipe === 'true';
+        if (elements.pipelineSortToggle) elements.pipelineSortToggle.checked = state.smartSortEnabled;
+      }
+
+      const savedSepPipe = localStorage.getItem('bosta_pipeline_separators');
+      if (savedSepPipe !== null) {
+        state.blankSeparatorsEnabled = savedSepPipe === 'true';
+        if (elements.pipelineSeparatorsToggle) elements.pipelineSeparatorsToggle.checked = state.blankSeparatorsEnabled;
+      }
+
+      const savedManPipe = localStorage.getItem('bosta_pipeline_manifest');
+      if (savedManPipe !== null) {
+        state.manifestSheetEnabled = savedManPipe === 'true';
+        if (elements.pipelineManifestToggle) elements.pipelineManifestToggle.checked = state.manifestSheetEnabled;
+      }
+
       const savedWalk = localStorage.getItem('bosta_walk_sequence');
       if (savedWalk !== null) {
         state.useWalkSequence = savedWalk === 'true';
@@ -1066,6 +1236,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.resizeCheckbox) elements.resizeCheckbox.checked = state.resizeEnabled;
       }
 
+      const savedFitMode = localStorage.getItem('bosta_label_fit_mode');
+      if (savedFitMode !== null) {
+        state.labelFitMode = savedFitMode;
+        if (savedFitMode === 'fill_width' && elements.fitModeFillRadio) {
+          elements.fitModeFillRadio.checked = true;
+        } else if (elements.fitModeSafeRadio) {
+          elements.fitModeSafeRadio.checked = true;
+        }
+      }
+
       const savedAspect = localStorage.getItem('bosta_keep_aspect_ratio');
       if (savedAspect !== null) {
         state.keepAspectRatio = savedAspect === 'true';
@@ -1086,6 +1266,57 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.warn('Error loading preferences from localStorage:', e);
     }
+  }
+
+  // Label Fit Mode Radio Listeners
+  if (elements.fitModeSafeRadio) {
+    elements.fitModeSafeRadio.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        state.labelFitMode = 'safe_fit';
+        try { localStorage.setItem('bosta_label_fit_mode', 'safe_fit'); } catch (_) {}
+      }
+    });
+  }
+  if (elements.fitModeFillRadio) {
+    elements.fitModeFillRadio.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        state.labelFitMode = 'fill_width';
+        try { localStorage.setItem('bosta_label_fit_mode', 'fill_width'); } catch (_) {}
+      }
+    });
+  }
+
+  // Pipeline Toolbar Event Listeners
+  if (elements.pipelineMergeToggle) {
+    elements.pipelineMergeToggle.addEventListener('change', (e) => {
+      state.mergeEnabled = e.target.checked;
+      try { localStorage.setItem('bosta_pipeline_merge', state.mergeEnabled); } catch (_) {}
+    });
+  }
+  if (elements.pipelineResizeToggle) {
+    elements.pipelineResizeToggle.addEventListener('change', (e) => {
+      state.thermalResizeEnabled = e.target.checked;
+      try { localStorage.setItem('bosta_pipeline_resize', state.thermalResizeEnabled); } catch (_) {}
+    });
+  }
+  if (elements.pipelineSortToggle) {
+    elements.pipelineSortToggle.addEventListener('change', (e) => {
+      state.smartSortEnabled = e.target.checked;
+      try { localStorage.setItem('bosta_pipeline_sort', state.smartSortEnabled); } catch (_) {}
+      if (state.extractedPages.length > 0) reSortAndRender();
+    });
+  }
+  if (elements.pipelineSeparatorsToggle) {
+    elements.pipelineSeparatorsToggle.addEventListener('change', (e) => {
+      state.blankSeparatorsEnabled = e.target.checked;
+      try { localStorage.setItem('bosta_pipeline_separators', state.blankSeparatorsEnabled); } catch (_) {}
+    });
+  }
+  if (elements.pipelineManifestToggle) {
+    elements.pipelineManifestToggle.addEventListener('change', (e) => {
+      state.manifestSheetEnabled = e.target.checked;
+      try { localStorage.setItem('bosta_pipeline_manifest', state.manifestSheetEnabled); } catch (_) {}
+    });
   }
 
   // Expandable panel accordion toggle
@@ -1209,7 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
    * Process & Extract PDF
    */
   async function processLabels() {
-    if (!state.pdfArrayBuffer) {
+    if (state.uploadedPdfFiles.length === 0 && !state.pdfArrayBuffer) {
       showToast('يرجى رفع ملف PDF أولاً.', 'error');
       return;
     }
@@ -1220,11 +1451,39 @@ document.addEventListener('DOMContentLoaded', () => {
     hideResults();
 
     try {
-      // 1. Text Extraction using safely cloned buffer
+      // 0. Merge Multi-PDFs if multiple files and merge toggle is enabled
+      if (state.uploadedPdfFiles.length > 1 && state.mergeEnabled) {
+        elements.progressBar.style.width = '10%';
+        elements.progressPercent.textContent = '10%';
+        elements.progressStatus.textContent = `جاري دمج ${state.uploadedPdfFiles.length} ملفات PDF معاً...`;
+
+        const buffers = state.uploadedPdfFiles.map(f => f.buffer);
+        const mergedBytes = await PDFProcessor.mergePdfBuffers(buffers, (prog) => {
+          const p = Math.round(prog.percent * 0.3);
+          elements.progressBar.style.width = `${p}%`;
+          elements.progressPercent.textContent = `${p}%`;
+          elements.progressStatus.textContent = `${prog.phase} (${prog.current} من ${prog.total})`;
+        });
+
+        window.rawUntouchedPdfBytes = new Uint8Array(mergedBytes);
+        state.masterPdfBytes = window.rawUntouchedPdfBytes;
+        state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
+      } else if (state.uploadedPdfFiles.length >= 1 && (!state.pdfArrayBuffer || !state.masterPdfBytes)) {
+        window.rawUntouchedPdfBytes = new Uint8Array(state.uploadedPdfFiles[0].buffer);
+        state.masterPdfBytes = window.rawUntouchedPdfBytes;
+        state.pdfArrayBuffer = window.rawUntouchedPdfBytes.slice(0).buffer;
+      }
+
+      // 1. Text Extraction using safely cloned buffer with non-blocking async loops
       const safeBuffer = state.pdfArrayBuffer.slice(0);
+      const isMerged = state.uploadedPdfFiles.length > 1 && state.mergeEnabled;
+      const basePct = isMerged ? 30 : 0;
+      const scale = isMerged ? 0.7 : 1.0;
+
       const extracted = await PDFProcessor.extractPages(safeBuffer, (prog) => {
-        elements.progressBar.style.width = `${prog.percent}%`;
-        elements.progressPercent.textContent = `${prog.percent}%`;
+        const overall = Math.min(100, Math.round(basePct + (prog.percent * scale)));
+        elements.progressBar.style.width = `${overall}%`;
+        elements.progressPercent.textContent = `${overall}%`;
         elements.progressStatus.textContent = `${prog.phase} (${prog.current} من ${prog.total})`;
       });
 
@@ -1259,7 +1518,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function reSortAndRender() {
     if (!state.extractedPages || state.extractedPages.length === 0) return;
 
-    state.sortedPages = PDFProcessor.sortPages(state.extractedPages, { useWalkSequence: state.useWalkSequence });
+    if (state.smartSortEnabled) {
+      state.sortedPages = PDFProcessor.sortPages(state.extractedPages, { useWalkSequence: state.useWalkSequence });
+    } else {
+      state.sortedPages = [...state.extractedPages];
+    }
     updateStatistics();
     updateDefaultFilename();
     renderTable();
@@ -1638,24 +1901,16 @@ document.addEventListener('DOMContentLoaded', () => {
       await currentCanvasRenderTask.promise;
       currentCanvasRenderTask = null;
 
-      // Feature 1: Stamp sequential label number [ #X ] on modal canvas for shipping labels only
+      // Feature 1: Stamp sequential label number [ #X ] on modal canvas strictly inside bottom margin safe zone
       if (activeModalItem && (activeModalItem.newPageNumber || activeModalItem.orderIndex)) {
         const seqNum = activeModalItem.newPageNumber || activeModalItem.orderIndex;
         const seqText = `[ #${seqNum} ]`;
-        const pt = viewport.convertToViewportPoint(172, 42);
-        const stampW = 28 * viewport.scale;
-        const stampH = 12 * viewport.scale;
+        const midX = viewport.viewBox ? (viewport.viewBox[2] / 2) : 106;
+        const pt = viewport.convertToViewportPoint(midX, 9.5);
 
         canvasContext.save();
-        canvasContext.fillStyle = '#ffffff';
-        canvasContext.strokeStyle = '#000000';
-        canvasContext.lineWidth = 1 * viewport.scale;
-        const rx = pt[0] - stampW / 2;
-        const ry = pt[1] - stampH / 2;
-        canvasContext.fillRect(rx, ry, stampW, stampH);
-        canvasContext.strokeRect(rx, ry, stampW, stampH);
         canvasContext.fillStyle = '#000000';
-        canvasContext.font = `bold ${8 * viewport.scale}px monospace`;
+        canvasContext.font = `bold ${13 * viewport.scale}px sans-serif`;
         canvasContext.textAlign = 'center';
         canvasContext.textBaseline = 'middle';
         canvasContext.fillText(seqText, pt[0], pt[1]);
@@ -1845,8 +2100,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     try {
       const mergedOptions = {
-        enableBatchPickLists: options.enableBatchPickLists !== undefined ? options.enableBatchPickLists : state.enableBatchPickLists,
-        insertBlankSeparators: options.insertBlankSeparators !== undefined ? options.insertBlankSeparators : state.enableBatchPickLists,
+        enableBatchPickLists: options.enableBatchPickLists !== undefined ? options.enableBatchPickLists : state.blankSeparatorsEnabled,
+        insertBlankSeparators: options.insertBlankSeparators !== undefined ? options.insertBlankSeparators : state.blankSeparatorsEnabled,
+        insertMasterManifest: options.insertMasterManifest !== undefined ? options.insertMasterManifest : state.manifestSheetEnabled,
+        thermalResize: options.thermalResize !== undefined ? options.thermalResize : state.thermalResizeEnabled,
+        fitMode: options.fitMode || state.labelFitMode || 'safe_fit',
+        widthMm: state.widthMm,
+        heightMm: state.heightMm,
         useWalkSequence: state.useWalkSequence,
         ...options
       };
@@ -1921,17 +2181,17 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Top Download Bar:
-  // Red Button: "تحميل كافة البوليصات مرتبة (101 بوليصة)" -> Calls downloadPdfBatch with separator options
+  // Red Button: "تحميل كافة البوليصات مرتبة" -> Calls downloadPdfBatch with active pipeline options
   if (elements.downloadTopBtn) {
     elements.downloadTopBtn.addEventListener('click', async () => {
       const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
-      await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
+      await downloadPdfBatch(state.sortedPages, filename);
     });
   }
   if (elements.downloadStickyBtn) {
     elements.downloadStickyBtn.addEventListener('click', async () => {
       const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
-      await downloadPdfBatch(state.sortedPages, filename, { insertBlankSeparators: state.insertBlankSeparators });
+      await downloadPdfBatch(state.sortedPages, filename);
     });
   }
 
@@ -1999,6 +2259,11 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.resetBtn.addEventListener('click', () => {
       state.pdfFile = null;
       state.pdfArrayBuffer = null;
+      state.masterPdfBytes = null;
+      window.rawUntouchedPdfBytes = null;
+      state.uploadedPdfFiles = [];
+      renderPdfFilesChips();
+
       state.inventoryFile = null;
       state.inventoryArrayBuffer = null;
       state.extractedPages = [];

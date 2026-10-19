@@ -59,6 +59,32 @@ const PDFProcessor = {
   },
 
   /**
+   * Merges multiple PDF Uint8Arrays / ArrayBuffers into a single unified document
+   */
+  async mergePdfBuffers(buffersArray, onProgress) {
+    const pdfLibModule = typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null);
+    if (!pdfLibModule) throw new Error('مكتبة pdf-lib غير متوفرة لدمج الملفات.');
+    const mergedDoc = await pdfLibModule.PDFDocument.create();
+
+    for (let fIdx = 0; fIdx < buffersArray.length; fIdx++) {
+      if (onProgress) {
+        onProgress({
+          current: fIdx + 1,
+          total: buffersArray.length,
+          percent: Math.round(((fIdx + 1) / buffersArray.length) * 100),
+          phase: `دمج ملف PDF رقم ${fIdx + 1} من ${buffersArray.length}...`
+        });
+      }
+      await new Promise(r => setTimeout(r, 0));
+      const srcDoc = await pdfLibModule.PDFDocument.load(buffersArray[fIdx], { ignoreEncryption: true });
+      const indices = srcDoc.getPageIndices();
+      const copiedPages = await mergedDoc.copyPages(srcDoc, indices);
+      copiedPages.forEach(p => mergedDoc.addPage(p));
+    }
+    return await mergedDoc.save();
+  },
+
+  /**
    * Extract text and metadata from all pages in the PDF with CMap recovery
    */
   async extractPages(arrayBuffer, onProgress) {
@@ -89,9 +115,11 @@ const PDFProcessor = {
           current: pageNum,
           total: numPages,
           percent: Math.round((pageNum / numPages) * 100),
-          phase: 'قراءة وتحليل الباركود والبيانات'
+          phase: `قراءة وتحليل البوليصة ${pageNum} من أصل ${numPages}...`
         });
       }
+      // Non-blocking yield to browser event loop so UI never freezes
+      await new Promise(r => setTimeout(r, 0));
 
       const page = await pdfDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
@@ -338,46 +366,29 @@ const PDFProcessor = {
   },
 
   /**
-   * Stamps a clean, small sequential reference box onto shipping labels ONLY.
-   * Placement: bottom notes area around x = 160..185, y = 35..55
-   * Sized ~26-32 pt x 12 pt with HelveticaBold font size 7.5 pt.
-   * NEVER called on blank separator pages or batch pick-list sheets.
+   * Stamps clean sequential reference [ #X ] strictly inside the blank white bottom margin (Safe Zone).
+   * Positioned below the label border and below "Created: ..." line at y: 8-12 pt from bottom edge.
+   * Bold font size 13 pt in solid black, with NO background box covering any label elements.
+   * NEVER called on blank separator pages, master manifest, or batch pick-list sheets.
    */
   stampLabelSequenceNumber(page, seqNumber, font) {
     if (!page || !seqNumber || !font) return;
     const { width } = page.getSize();
     const numText = `[ #${seqNumber} ]`;
-    const fontSize = 7.5;
+    const fontSize = 13; // Clear bold font (12-14 pt)
     const textWidth = font.widthOfTextAtSize(numText, fontSize);
 
-    // Box dimensions
-    const boxWidth = Math.max(26, textWidth + 6);
-    const boxHeight = 12;
-
-    // Coordinate calculation: within x = 160..185, y = 35..55
-    const x = Math.min(width - boxWidth - 10, Math.max(160, width - boxWidth - 14));
-    const y = 42;
+    // Position strictly inside the blank white margin at the bottom of the page
+    // Coordinates: x = center, y = 9.5 pt from bottom edge (within 8 to 12 pt safe zone)
+    const x = (width - textWidth) / 2;
+    const y = 9.5;
 
     const { rgb } = (typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null));
 
-    // Solid white background box with crisp black border
-    page.drawRectangle({
+    // Draw text cleanly in solid black with NO background box
+    page.drawText(numText, {
       x,
       y,
-      width: boxWidth,
-      height: boxHeight,
-      color: rgb(1, 1, 1),
-      borderColor: rgb(0, 0, 0),
-      borderWidth: 1
-    });
-
-    // Centered bold text
-    const textX = x + (boxWidth - textWidth) / 2;
-    const textY = y + (boxHeight - fontSize) / 2 + 1;
-
-    page.drawText(numText, {
-      x: textX,
-      y: textY,
       size: fontSize,
       font,
       color: rgb(0, 0, 0)
@@ -854,14 +865,254 @@ const PDFProcessor = {
   },
 
   /**
-   * Generates final sorted PDF (Pure 1:1 binary copy)
+   * Adjusts page size to thermal 75x125 mm (212.60 x 354.33 pt)
+   * If already ~75x125mm (e.g. 195..235 x 335..375 pt), keeps native coordinates to preserve barcode sharpness.
+   */
+  /**
+   * Adjusts page size to thermal 75x125 mm (212.60 x 354.33 pt) with dedicated bottom margin.
+   * Gives two clean choices:
+   * - Option A (Default - 'safe_fit'): Scales proportionally so all 4 borders fit cleanly,
+   *   leaving dedicated blank margin space (y: 0..26 pt) at the bottom for the [ #X ] sequence number.
+   * - Option B ('fill_width'): Stretches label width to fill full 75mm thermal width, anchored
+   *   towards the top, preserving the bottom margin exclusively for the sequence number.
+   */
+  applyThermalResize(page, options = {}) {
+    if (!page) return;
+    const fitMode = (typeof options === 'string' ? options : options.fitMode) || 'safe_fit';
+    const targetW = options.targetWidth || 212.60;
+    const targetH = options.targetHeight || 354.33;
+    const bottomMargin = 26; // Dedicated blank bottom margin exclusively for [ #X ]
+
+    const { width: origW, height: origH } = page.getSize();
+
+    if (fitMode === 'fill_width') {
+      // Option B (Fill Width - 100%): Stretches label width to fill full 75mm, anchored towards top
+      const availH = targetH - bottomMargin;
+      const scaleX = targetW / origW;
+      const scaleY = Math.min(scaleX, availH / origH);
+      const scale = Math.min(scaleX, scaleY);
+      const scaledW = origW * scale;
+      const scaledH = origH * scale;
+
+      page.scale(scale, scale);
+      page.setSize(targetW, targetH);
+      const offsetX = (targetW - scaledW) / 2;
+      const offsetY = targetH - scaledH - 3; // Anchored towards top
+      page.translateContent(offsetX, Math.max(bottomMargin, offsetY));
+    } else {
+      // Option A (Default - Safe Fit with Margins): Scales label proportionally so all 4 borders fit cleanly
+      const sideMargin = 6;
+      const topMargin = 6;
+      const availW = targetW - (sideMargin * 2);
+      const availH = targetH - bottomMargin - topMargin;
+
+      const scale = Math.min(availW / origW, availH / origH);
+      const scaledW = origW * scale;
+      const scaledH = origH * scale;
+
+      page.scale(scale, scale);
+      page.setSize(targetW, targetH);
+      const offsetX = (targetW - scaledW) / 2;
+      const offsetY = bottomMargin + (availH - scaledH) / 2;
+      page.translateContent(offsetX, offsetY);
+    }
+  },
+
+  /**
+   * Generates Master Manifest / Pick List Summary Sheet at the beginning of the PDF
+   * (75mm x 125mm = 212.60 x 354.33 pt)
+   */
+  async createMasterManifestSheet(outDoc, sortedPages) {
+    const totalOrders = sortedPages.length;
+    let totalPieces = 0;
+    const itemMap = new Map();
+
+    for (const order of sortedPages) {
+      const orderPieces = order.piecesCount || order.totalItemsCount || (order.products ? order.products.reduce((a, b) => a + (b.qty || 1), 0) : 1);
+      totalPieces += orderPieces;
+
+      const items = (order.products && order.products.length > 0)
+        ? order.products
+        : [{
+            modelName: order.modelName || 'صنف غير محدد',
+            color: order.color || '',
+            size: order.size || '',
+            qty: orderPieces,
+            sku: order.sku || ''
+          }];
+
+      for (const it of items) {
+        let itemSku = it.sku || order.sku || '';
+        const model = it.modelName || order.modelName || 'صنف غير محدد';
+        const color = it.color || '';
+        const size = it.size || '';
+        const qty = it.qty || 1;
+
+        if (!itemSku && typeof InventoryParser !== 'undefined') {
+          const match = InventoryParser.matchProduct({ modelName: model, color, size });
+          if (match && match.sku) itemSku = match.sku;
+        }
+
+        const key = itemSku ? itemSku : `${model}|${color}|${size}`;
+        if (!itemMap.has(key)) {
+          let walkIdx = 999999;
+          if (typeof InventoryParser !== 'undefined') {
+            walkIdx = InventoryParser.getWalkIndex({ sku: itemSku, modelName: model, color, size });
+          }
+          itemMap.set(key, {
+            name: `${model}${color ? ` - ${color}` : ''}${size ? ` / ${size}` : ''}`,
+            sku: itemSku,
+            qty,
+            walkIndex: walkIdx
+          });
+        } else {
+          itemMap.get(key).qty += qty;
+        }
+      }
+    }
+
+    const aggregatedItems = Array.from(itemMap.values());
+    aggregatedItems.sort((a, b) => {
+      if (a.walkIndex !== b.walkIndex) return a.walkIndex - b.walkIndex;
+      return b.qty - a.qty;
+    });
+
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 886; // 300 DPI for 75 mm
+      canvas.height = 1476; // 300 DPI for 125 mm
+      const ctx = canvas.getContext('2d');
+
+      // White background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Header Banner
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(8, 8, canvas.width - 16, 110);
+
+      ctx.fillStyle = '#2dd4bf';
+      ctx.font = 'bold 28px "Alexandria", "Cairo", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('📋 بيان تجهيز البضاعة (Master Manifest)', canvas.width / 2, 50);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 18px "Alexandria", "Cairo", sans-serif';
+      ctx.fillText(`إجمالي البوالص: ${totalOrders} | إجمالي القطع المطلوبة: ${totalPieces} قطعة`, canvas.width / 2, 88);
+
+      // Table Header (40px)
+      const tableStartY = 126;
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(8, tableStartY, canvas.width - 16, 38);
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 16px "Alexandria", "Cairo", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('اسم الموديل واللون والمقاس', 810, tableStartY + 25);
+
+      ctx.textAlign = 'center';
+      ctx.fillText('كود الـ SKU', 210, tableStartY + 25);
+      ctx.fillText('الكمية', 68, tableStartY + 25);
+      ctx.fillText('تجهيز', 848, tableStartY + 25);
+
+      // Table Rows
+      const rowHeight = Math.min(46, Math.max(30, Math.floor((canvas.height - tableStartY - 80) / Math.max(1, Math.min(aggregatedItems.length, 24)))));
+      let curY = tableStartY + 38;
+
+      for (let idx = 0; idx < aggregatedItems.length; idx++) {
+        if (curY + rowHeight > canvas.height - 45) break;
+        const it = aggregatedItems[idx];
+        const isEven = idx % 2 === 0;
+
+        ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(8, curY, canvas.width - 16, rowHeight);
+
+        // Divider
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(8, curY, canvas.width - 16, rowHeight);
+
+        // Checkbox
+        const boxSize = 20;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(838, curY + (rowHeight - boxSize) / 2, boxSize, boxSize);
+
+        // Name
+        ctx.fillStyle = '#0f172a';
+        ctx.textAlign = 'right';
+        ctx.font = 'bold 15px "Alexandria", "Cairo", sans-serif';
+        let dName = it.name;
+        if (dName.length > 40) dName = dName.substring(0, 38) + '...';
+        ctx.fillText(dName, 810, curY + rowHeight * 0.65);
+
+        // SKU
+        if (it.sku) {
+          ctx.fillStyle = '#0f766e';
+          ctx.textAlign = 'center';
+          ctx.font = 'bold 14px monospace';
+          ctx.fillText(it.sku, 210, curY + rowHeight * 0.65);
+        } else {
+          ctx.fillStyle = '#94a3b8';
+          ctx.textAlign = 'center';
+          ctx.font = 'bold 14px monospace';
+          ctx.fillText('-', 210, curY + rowHeight * 0.65);
+        }
+
+        // Qty Pill
+        const qtyW = 55;
+        const qtyH = Math.min(28, rowHeight - 6);
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(40, curY + (rowHeight - qtyH) / 2, qtyW, qtyH, 6);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(`${it.qty}`, 40 + qtyW / 2, curY + (rowHeight - qtyH) / 2 + qtyH * 0.72);
+
+        curY += rowHeight;
+      }
+
+      // Footer
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(8, canvas.height - 38, canvas.width - 16, 30);
+      ctx.fillStyle = '#475569';
+      ctx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('قم بتجهيز كافة الأصناف الموضحة أعلاه من ممرات المخزن قبل البدء في التغليف 📦', canvas.width / 2, canvas.height - 18);
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const pngImage = await outDoc.embedPng(dataUrl);
+      const page = outDoc.addPage([212.60, 354.33]);
+      page.drawImage(pngImage, { x: 0, y: 0, width: 212.60, height: 354.33 });
+      return page;
+    } else {
+      // Node.js fallback
+      const page = outDoc.addPage([212.60, 354.33]);
+      const { rgb, StandardFonts } = (typeof PDFLib !== 'undefined' ? PDFLib : global.PDFLib);
+      const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
+      page.drawText(`MASTER PICK LIST | ${totalOrders} ORDERS | ${totalPieces} PCS`, {
+        x: 10,
+        y: 330,
+        size: 8,
+        font,
+        color: rgb(0, 0, 0)
+      });
+      return page;
+    }
+  },
+
+  /**
+   * Generates final sorted PDF (Pure 1:1 binary copy with thermal resize and separators)
    * Auto-Batching Pick Lists & Blank Separators:
    * 1. Large orders (3+ pieces): Batched <= 30 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
    * 2. Two-piece orders (2 pieces): Batched <= 10 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
-   * 3. Single-piece orders (1 piece): NO pick lists and NO blank separators inside!
+   * 3. Single-piece orders (1 piece): NO pick lists inside. Blank separator before carpets.
    * Stamping Rule:
    * Stamps small sequential reference box [ #1 ], [ #2 ] onto shipping labels ONLY!
-   * NEVER stamps on blank separators or batch pick-list sheets.
+   * NEVER stamps on blank separators, master manifest, or batch pick-list sheets.
    */
   async generateSortedPDF(masterPdfBytes, sortedPages, options = {}, onProgress) {
     const pdfLibModule = typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null);
@@ -888,6 +1139,11 @@ const PDFProcessor = {
       // Embed standard font for sequential label stamping
       const stampFont = await outDoc.embedFont(pdfLibModule.StandardFonts.HelveticaBold);
 
+      // Prepend Master Manifest summary page if requested
+      if (options.insertMasterManifest === true) {
+        await this.createMasterManifestSheet(outDoc, sortedPages);
+      }
+
       if (!enableBatchPickLists) {
         // Simple direct 1:1 binary copy with sequential stamping on shipping labels
         const sortedIndices = sortedPages.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
@@ -901,9 +1157,15 @@ const PDFProcessor = {
               phase: 'تجهيز صفحات الطباعة (ترقيم البوالص ونسخ ثنائي 1:1)'
             });
           }
+          await new Promise(r => setTimeout(r, 0));
           const cp = copiedPages[i];
           const order = sortedPages[i];
           const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (i + 1);
+
+          // Thermal resize if enabled
+          if (options.thermalResize !== false) {
+            this.applyThermalResize(cp, options);
+          }
 
           // Stamp sequence number box onto shipping labels ONLY
           this.stampLabelSequenceNumber(cp, seqNum, stampFont);
@@ -934,15 +1196,33 @@ const PDFProcessor = {
         }
       }
 
+      let processedCount = 0;
+      const totalOrdersToProcess = sortedPages.length;
+
       // Helper to copy and add orders in an array with sequential label stamp
       const addOrderLabels = async (ordersList) => {
         if (!ordersList || ordersList.length === 0) return;
         const indices = ordersList.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
         const copied = await outDoc.copyPages(srcDoc, indices);
         for (let i = 0; i < copied.length; i++) {
+          processedCount++;
+          if (onProgress) {
+            onProgress({
+              current: processedCount,
+              total: totalOrdersToProcess,
+              percent: Math.round((processedCount / totalOrdersToProcess) * 100),
+              phase: 'تجهيز بوالص الشحن وترقيمها وتنسيق الأبعاد الحرارية'
+            });
+          }
+          await new Promise(r => setTimeout(r, 0));
           const cp = copied[i];
           const order = ordersList[i];
-          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (i + 1);
+          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (processedCount);
+
+          // Thermal resize if enabled
+          if (options.thermalResize !== false) {
+            this.applyThermalResize(cp, options);
+          }
 
           // Stamp sequence number box onto shipping labels ONLY
           this.stampLabelSequenceNumber(cp, seqNum, stampFont);
@@ -975,7 +1255,9 @@ const PDFProcessor = {
           // Insert Page A: Pick list sheet
           await this.createPickListSheet(outDoc, batch, 'large');
           // Insert Page B: 100% Blank separator
-          outDoc.addPage([212.60, 354.33]);
+          if (options.insertBlankSeparators !== false) {
+            outDoc.addPage([212.60, 354.33]);
+          }
         }
       }
 
@@ -1003,7 +1285,9 @@ const PDFProcessor = {
           // Insert Page A: Pick list sheet
           await this.createPickListSheet(outDoc, batch, 'twopiece');
           // Insert Page B: 100% Blank separator
-          outDoc.addPage([212.60, 354.33]);
+          if (options.insertBlankSeparators !== false) {
+            outDoc.addPage([212.60, 354.33]);
+          }
         }
       }
 
@@ -1019,7 +1303,7 @@ const PDFProcessor = {
             ? InventoryParser.isCarpetItem(order)
             : (order.fullNormalizedDesc || '').includes('سجاد');
 
-          if (!carpetSeparatorInserted && isCarpet && nonCarpetPrinted) {
+          if (options.insertBlankSeparators !== false && !carpetSeparatorInserted && isCarpet && nonCarpetPrinted) {
             outDoc.addPage([212.60, 354.33]);
             carpetSeparatorInserted = true;
           }
