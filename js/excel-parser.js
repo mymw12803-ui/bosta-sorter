@@ -1,146 +1,271 @@
 /**
- * Excel / CSV Inventory Parser using SheetJS
- * Parses warehouse inventory export files (Shopify, Salla, Zid, Custom)
- * Standard columns: Handle, Title, Option1 Value, Option2 Value, SKU
+ * Excel / CSV Inventory & Master Warehouse Route Parser using SheetJS
+ * Exclusively driven by master Excel sheet (inventory_export_1.xlsx - Sheet: بعد الترتيب)
+ * 546+ official warehouse items & SKUs defining physical picking aisle order (Rank 0..N)
+ * Future-Proof: Dynamically stores uploaded catalog updates in localStorage
  */
 
 const InventoryParser = {
   inventoryItems: [],
-  skuMap: new Map(), // key -> item
-  normalizedLookup: new Map(), // normalized key -> item
-  skuPriorityOrder: new Map(), // sku -> index (0, 1, 2...) for custom inventory order
-  skuOrderMap: new Map(), // Map 1 (by SKU): normalizeText(row['SKU']) -> rowIndex
-  productOrderMap: new Map(), // Map 2 (by Title + Color + Size): compositeKey -> rowIndex
-  spaceImmuneLookup: new Map(), // space-stripped title -> index
+  skuRankMap: new Map(),       // normalized lowercase sku -> rowIndex (0..N)
+  titleRankMap: new Map(),     // normalized Arabic title -> rowIndex (0..N)
+  skuMap: new Map(),           // uppercase sku -> item
+  skuOrderMap: new Map(),       // normalized / upper sku -> rowIndex (backwards compat)
+  productOrderMap: new Map(),  // composite title+color+size -> rowIndex (backwards compat)
+  spaceImmuneLookup: new Map(),// space-stripped title -> rowIndex
 
   /**
-   * Resets loaded inventory data
+   * Resets loaded inventory data maps
    */
   reset() {
     this.inventoryItems = [];
+    this.skuRankMap.clear();
+    this.titleRankMap.clear();
     this.skuMap.clear();
-    this.normalizedLookup.clear();
-    this.skuPriorityOrder.clear();
     this.skuOrderMap.clear();
     this.productOrderMap.clear();
     this.spaceImmuneLookup.clear();
   },
 
   /**
-   * Parse ArrayBuffer of Excel (.xlsx) or CSV file (e.g. inventory_export_1.csv)
+   * Initializes catalog on application load:
+   * 1. Check localStorage for updated catalog saved by user
+   * 2. Fall back to bundled DEFAULT_INVENTORY_ITEMS (547 items from بعد الترتيب)
    */
-  async parseFile(arrayBuffer) {
+  init() {
+    let itemsToLoad = null;
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('bosta_excel_inventory_items');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            itemsToLoad = parsed;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load inventory from localStorage:', e);
+      }
+    }
+
+    if (!itemsToLoad) {
+      if (typeof DEFAULT_INVENTORY_ITEMS !== 'undefined' && Array.isArray(DEFAULT_INVENTORY_ITEMS)) {
+        itemsToLoad = DEFAULT_INVENTORY_ITEMS;
+      } else if (typeof window !== 'undefined' && window.DEFAULT_INVENTORY_ITEMS) {
+        itemsToLoad = window.DEFAULT_INVENTORY_ITEMS;
+      } else if (typeof global !== 'undefined' && global.DEFAULT_INVENTORY_ITEMS) {
+        itemsToLoad = global.DEFAULT_INVENTORY_ITEMS;
+      }
+    }
+
+    if (itemsToLoad && itemsToLoad.length > 0) {
+      this.buildMaps(itemsToLoad);
+    }
+  },
+
+  /**
+   * Builds lookup maps from items array
+   * Assigns sequential rank (0..N) matching warehouse aisle loop
+   */
+  buildMaps(items) {
     this.reset();
-    if (typeof XLSX === 'undefined') {
-      throw new Error('مكتبة SheetJS غير محملة. يرجى التحقق من اتصال الإنترنت.');
-    }
+    this.inventoryItems = items;
 
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const firstSheetName = workbook.SheetNames[0];
-    if (!firstSheetName) {
-      throw new Error('ملف الإكسيل فارغ ولا يحتوي على أوراق عمل.');
-    }
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const rowIndex = typeof item.index === 'number' ? item.index : i;
+      item.index = rowIndex;
+      item.rowIndex = rowIndex;
 
-    const worksheet = workbook.Sheets[firstSheetName];
-    const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+      // 1. SKU Rank Map (normalized lowercase and uppercase)
+      if (item.sku) {
+        const rawSku = String(item.sku).trim();
+        const lowerSku = rawSku.toLowerCase();
+        const upperSku = rawSku.toUpperCase();
 
-    if (!rawRows || rawRows.length === 0) {
-      throw new Error('لم يتم العثور على أي صفوف أو بيانات داخل ملف المخزون.');
-    }
+        if (!this.skuRankMap.has(lowerSku)) {
+          this.skuRankMap.set(lowerSku, rowIndex);
+        }
+        this.skuMap.set(upperSku, item);
+        this.skuOrderMap.set(lowerSku, rowIndex);
+        this.skuOrderMap.set(upperSku, rowIndex);
 
-    let index = 0;
-    for (const row of rawRows) {
-      // Find columns with flexible aliases
-      const title = this.findFieldValue(row, ['Title', 'title', 'اسم المنتج', 'اسم الموديل', 'المنتج', 'Product Name']);
-      const option1 = this.findFieldValue(row, ['Option1 Value', 'Option1', 'اللون', 'Color', 'Variant Color', 'option1_value']);
-      const option2 = this.findFieldValue(row, ['Option2 Value', 'Option2', 'المقاس', 'Size', 'Variant Size', 'option2_value']);
-      const sku = this.findFieldValue(row, ['SKU', 'sku', 'رمز المنتج', 'كود الصنف', 'Variant SKU', 'Sku']);
-      const handle = this.findFieldValue(row, ['Handle', 'handle', 'المعرف']);
-
-      if (title || sku) {
-        const rowIndex = index++;
-        const item = {
-          index: rowIndex,
-          rowIndex: rowIndex,
-          title: String(title).trim(),
-          color: String(option1).trim(),
-          size: String(option2).trim(),
-          sku: String(sku).trim().toUpperCase(),
-          handle: String(handle).trim()
-        };
-
-        this.inventoryItems.push(item);
-
-        // Map 1 (by SKU): skuOrderMap.set(normalizeText(row['SKU']), rowIndex)
-        if (item.sku) {
-          this.skuMap.set(item.sku, item);
-          this.skuPriorityOrder.set(item.sku, rowIndex);
-
-          const normSku = ArabicUtils.normalizeText(item.sku);
+        if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeText === 'function') {
+          const normSku = ArabicUtils.normalizeText(rawSku);
           if (!this.skuOrderMap.has(normSku)) {
             this.skuOrderMap.set(normSku, rowIndex);
           }
-          if (!this.skuOrderMap.has(item.sku.toUpperCase())) {
-            this.skuOrderMap.set(item.sku.toUpperCase(), rowIndex);
-          }
+        }
+      }
+
+      // 2. Title Rank Map (normalized Arabic text)
+      if (item.title) {
+        const rawTitle = String(item.title).trim();
+        let normArabic = rawTitle;
+        if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeArabic === 'function') {
+          normArabic = ArabicUtils.normalizeArabic(rawTitle);
+        } else {
+          normArabic = rawTitle.replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, '');
         }
 
-        // Map 2 (by Title + Color + Size):
-        // compositeKey = normalizeArabic(row['Title'] + ' ' + (row['Option1 Value'] || '') + ' ' + (row['Option2 Value'] || ''))
-        // productOrderMap.set(compositeKey, rowIndex)
-        if (item.title) {
-          const compositeKey = ArabicUtils.normalizeArabic(item.title + ' ' + (item.color || '') + ' ' + (item.size || ''));
-          if (!this.productOrderMap.has(compositeKey)) {
-            this.productOrderMap.set(compositeKey, rowIndex);
-          }
+        if (normArabic && !this.titleRankMap.has(normArabic)) {
+          this.titleRankMap.set(normArabic, rowIndex);
+        }
 
-          // Fallback composite: Title + Color
-          const titleColorKey = ArabicUtils.normalizeArabic(item.title + ' ' + (item.color || ''));
-          if (!this.productOrderMap.has(titleColorKey)) {
-            this.productOrderMap.set(titleColorKey, rowIndex);
-          }
+        // Composite keys for backward compatibility
+        const color = item.color || '';
+        const size = item.size || '';
+        const composite = normArabic + (color ? ' ' + color : '') + (size ? ' ' + size : '');
+        const normComposite = (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeArabic === 'function')
+          ? ArabicUtils.normalizeArabic(composite)
+          : composite.replace(/\s+/g, '');
 
-          // Fallback: Title only
-          const titleKey = ArabicUtils.normalizeArabic(item.title);
-          if (!this.productOrderMap.has(titleKey)) {
-            this.productOrderMap.set(titleKey, rowIndex);
-          }
-          if (!this.spaceImmuneLookup.has(titleKey)) {
-            this.spaceImmuneLookup.set(titleKey, rowIndex);
-          }
-
-          // Normalized lookup for attribute matching
-          const normTitle = ArabicUtils.normalizeText(item.title);
-          const normColor = ArabicUtils.normalizeText(item.color);
-          const normSize = ArabicUtils.normalizeText(item.size);
-
-          if (normTitle) {
-            const fullKey = `${normTitle}__${normColor}__${normSize}`;
-            if (!this.normalizedLookup.has(fullKey)) {
-              this.normalizedLookup.set(fullKey, item);
-            }
-            const tcKey = `${normTitle}__${normColor}`;
-            if (!this.normalizedLookup.has(tcKey)) {
-              this.normalizedLookup.set(tcKey, item);
-            }
-            if (!this.normalizedLookup.has(normTitle)) {
-              this.normalizedLookup.set(normTitle, item);
-            }
-          }
+        if (!this.productOrderMap.has(normComposite)) {
+          this.productOrderMap.set(normComposite, rowIndex);
+        }
+        if (!this.productOrderMap.has(normArabic)) {
+          this.productOrderMap.set(normArabic, rowIndex);
+        }
+        if (!this.spaceImmuneLookup.has(normArabic)) {
+          this.spaceImmuneLookup.set(normArabic, rowIndex);
         }
       }
     }
 
     return {
       totalItems: this.inventoryItems.length,
-      uniqueSkus: this.skuMap.size
+      uniqueSkus: this.skuRankMap.size
     };
   },
 
   /**
-   * Helper to inspect row for matching column names
+   * Parse ArrayBuffer of Excel (.xlsx) or CSV file (e.g. inventory_export_1.xlsx)
+   * Specifically targets sheet "بعد الترتيب" or sheets with columns "الصنف" and "SKU"
+   * Saves parsed catalog to localStorage for future-proofing
+   */
+  async parseFile(arrayBuffer) {
+    if (typeof XLSX === 'undefined') {
+      throw new Error('مكتبة SheetJS غير محملة. يرجى التحقق من اتصال الإنترنت.');
+    }
+
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+      throw new Error('ملف الإكسيل فارغ ولا يحتوي على أوراق عمل.');
+    }
+
+    // Target sheet "بعد الترتيب" or sheets containing "بعد" / "ترتيب"
+    let targetSheetName = workbook.SheetNames.find(name => {
+      const norm = name.trim().replace(/\s+/g, ' ');
+      return norm.includes('بعد الترتيب') || (norm.includes('بعد') && norm.includes('ترتيب'));
+    });
+
+    // If not found by name, scan all sheets for columns "الصنف" and "SKU"
+    if (!targetSheetName) {
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0, defval: '' });
+        if (rows && rows.length > 0) {
+          const headerRow = rows[0].map(h => String(h).trim().toLowerCase());
+          const hasSku = headerRow.some(h => h.includes('sku') || h.includes('رمز') || h.includes('كود'));
+          const hasTitle = headerRow.some(h => h.includes('صنف') || h.includes('منتج') || h.includes('title'));
+          if (hasSku && hasTitle) {
+            targetSheetName = sheetName;
+            break;
+          }
+        }
+      }
+    }
+
+    // Fall back to first sheet
+    if (!targetSheetName) {
+      targetSheetName = workbook.SheetNames[0];
+    }
+
+    const worksheet = workbook.Sheets[targetSheetName];
+    const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+    if (!rawRows || rawRows.length === 0) {
+      throw new Error(`ورقة العمل "${targetSheetName}" فارغة ولا تحتوي على بيانات.`);
+    }
+
+    const newItems = [];
+    let rowIndex = 0;
+
+    for (const row of rawRows) {
+      const title = this.findFieldValue(row, ['الصنف', 'Title', 'title', 'اسم المنتج', 'اسم الموديل', 'المنتج', 'Product Name', 'item']);
+      const sku = this.findFieldValue(row, ['SKU', 'sku', 'رمز المنتج', 'كود الصنف', 'Variant SKU', 'Sku']);
+      const option1 = this.findFieldValue(row, ['اللون', 'Option1 Value', 'Option1', 'Color', 'Variant Color', 'option1_value']);
+      const option2 = this.findFieldValue(row, ['المقاس', 'Option2 Value', 'Option2', 'Size', 'Variant Size', 'option2_value']);
+
+      if (title || sku) {
+        newItems.push({
+          index: rowIndex++,
+          title: String(title || '').trim(),
+          sku: String(sku || '').trim(),
+          color: String(option1 || '').trim(),
+          size: String(option2 || '').trim()
+        });
+      }
+    }
+
+    if (newItems.length === 0) {
+      throw new Error('لم يتم العثور على أي أصناف أو أكواد SKU صالحة في الورقة المحددة.');
+    }
+
+    // Build active lookup maps
+    this.buildMaps(newItems);
+
+    // Save to localStorage for future-proof persistence
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('bosta_excel_inventory_items', JSON.stringify(newItems));
+      } catch (e) {
+        console.warn('Failed to save updated catalog to localStorage:', e);
+      }
+    }
+
+    return {
+      sheetName: targetSheetName,
+      totalItems: this.inventoryItems.length,
+      uniqueSkus: this.skuRankMap.size
+    };
+  },
+
+  /**
+   * Resets catalog to default pre-bundled 547 items from sheet بعد الترتيب
+   * Clears localStorage override
+   */
+  resetToDefaultCatalog() {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem('bosta_excel_inventory_items');
+      } catch (e) {
+        console.warn('Failed to clear localStorage:', e);
+      }
+    }
+
+    let defaultItems = [];
+    if (typeof DEFAULT_INVENTORY_ITEMS !== 'undefined' && Array.isArray(DEFAULT_INVENTORY_ITEMS)) {
+      defaultItems = DEFAULT_INVENTORY_ITEMS;
+    } else if (typeof window !== 'undefined' && window.DEFAULT_INVENTORY_ITEMS) {
+      defaultItems = window.DEFAULT_INVENTORY_ITEMS;
+    } else if (typeof global !== 'undefined' && global.DEFAULT_INVENTORY_ITEMS) {
+      defaultItems = global.DEFAULT_INVENTORY_ITEMS;
+    }
+
+    this.buildMaps(defaultItems);
+    return {
+      totalItems: this.inventoryItems.length,
+      uniqueSkus: this.skuRankMap.size
+    };
+  },
+
+  /**
+   * Helper to inspect row object for matching column names
    */
   findFieldValue(row, possibleNames) {
+    if (!row) return '';
     for (const key of Object.keys(row)) {
       const trimmedKey = key.trim().toLowerCase();
       for (const name of possibleNames) {
@@ -153,152 +278,217 @@ const InventoryParser = {
   },
 
   /**
-   * Match parsed Bosta order item with inventory records to enrich SKU and priority
+   * Get warehouse physical picking row index (Rank) for SKU
+   * Matches case-insensitively (e.g. ba014e2, Bb012E1)
    */
-  matchProduct(product) {
-    if (!product || this.inventoryItems.length === 0) return null;
-
-    const normTitle = product.normalizedModel || ArabicUtils.normalizeText(product.modelName);
-    const normColor = product.normalizedColor || ArabicUtils.normalizeText(product.color);
-    const normSize = product.normalizedSize || ArabicUtils.normalizeText(product.size);
-
-    // 1. Try full match (title + color + size)
-    const fullKey = `${normTitle}__${normColor}__${normSize}`;
-    if (this.normalizedLookup.has(fullKey)) {
-      return this.normalizedLookup.get(fullKey);
-    }
-
-    // 2. Try title + color match
-    const titleColorKey = `${normTitle}__${normColor}`;
-    if (this.normalizedLookup.has(titleColorKey)) {
-      return this.normalizedLookup.get(titleColorKey);
-    }
-
-    // 3. Try partial title match
-    for (const [key, item] of this.normalizedLookup.entries()) {
-      if (normTitle && (key.includes(normTitle) || normTitle.includes(key))) {
-        if (!normColor || item.color === product.color || ArabicUtils.normalizeText(item.color) === normColor) {
-          return item;
-        }
-      }
-    }
-
-    return null;
-  },
-
-  /**
-   * Get priority index for SKU based on inventory file sequence
-   */
-  getSKUPriority(sku) {
+  getSKURank(sku) {
     if (!sku) return 999999;
-    const upper = sku.toUpperCase();
-    if (this.skuOrderMap.has(upper)) {
-      return this.skuOrderMap.get(upper);
-    }
-    const norm = ArabicUtils.normalizeText(sku);
-    if (this.skuOrderMap.has(norm)) {
-      return this.skuOrderMap.get(norm);
+    const lower = String(sku).trim().toLowerCase();
+    if (this.skuRankMap.has(lower)) {
+      return this.skuRankMap.get(lower);
     }
     return 999999;
   },
 
   /**
-   * Retrieves picking walk sequence priority rowIndex for an order or product
-   * 1. Check if the order has a matching SKU code in the notes/description and look up its rowIndex
-   * 2. If no SKU is found, match product title, color, and size against productOrderMap
-   * 3. Return matched rowIndex ascending so items appear in exact warehouse CSV order
+   * Smart fallback text matching for product description / model name
+   * Matches normalized Arabic against catalog rows
    */
-  getWalkIndex(orderOrProduct) {
-    if (!orderOrProduct) return 999999;
-    if (this.inventoryItems.length === 0 && this.skuOrderMap.size === 0) return 999999;
-
-    // 1. First check if order has an explicit SKU or SKU in notes/description:
-    if (orderOrProduct.sku) {
-      const prio = this.getSKUPriority(orderOrProduct.sku);
-      if (prio !== 999999) return prio;
+  getTitleRank(titleOrDesc) {
+    if (!titleOrDesc) return 999999;
+    let norm = '';
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeArabic === 'function') {
+      norm = ArabicUtils.normalizeArabic(titleOrDesc);
+    } else {
+      norm = String(titleOrDesc).replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, '');
     }
 
-    // Scan notes and description for embedded SKU codes (e.g. ba014e2, Ac055ca4, fa099k1)
-    const notesAndDesc = `${orderOrProduct.rawNotes || ''} ${orderOrProduct.rawDescription || ''}`;
+    if (!norm) return 999999;
+
+    // 1. Exact normalized match
+    if (this.titleRankMap.has(norm)) {
+      return this.titleRankMap.get(norm);
+    }
+
+    // 2. Substring matching against catalog titles (longest title match first)
+    let bestRank = 999999;
+    let maxMatchLen = 0;
+
+    for (const [key, rank] of this.titleRankMap.entries()) {
+      if (norm.includes(key) || key.includes(norm)) {
+        const matchLen = Math.min(norm.length, key.length);
+        if (matchLen > maxMatchLen) {
+          maxMatchLen = matchLen;
+          bestRank = rank;
+        }
+      }
+    }
+
+    return bestRank;
+  },
+
+  /**
+   * Retrieves picking walk sequence priority rowIndex for an individual product/item
+   */
+  getItemRank(item) {
+    if (!item) return 999999;
+
+    // 1. Try explicit SKU
+    if (item.sku) {
+      const r = this.getSKURank(item.sku);
+      if (r !== 999999) return r;
+    }
+
+    // 2. Try product line text / model name + color + size
+    const model = item.modelName || item.title || item.name || '';
+    const color = item.color || '';
+    const size = item.size || '';
+    const desc = `${model} ${color} ${size}`.trim();
+
+    if (desc) {
+      const r = this.getTitleRank(desc);
+      if (r !== 999999) return r;
+    }
+
+    if (model) {
+      const r = this.getTitleRank(model);
+      if (r !== 999999) return r;
+    }
+
+    return 999999;
+  },
+
+  /**
+   * Computes the Master Excel Rank (0..N) for an entire order:
+   * 1. Checks explicit order SKU or scans notes/description for embedded SKU codes (e.g. ba014e2, Bb012E1)
+   * 2. For multi-piece orders: evaluates each product item and takes Math.min(...) (earliest aisle encounter)
+   * 3. Fallback: smart Arabic text matching (Model + Color + Size)
+   * Returns earliest row index in Excel sheet بعد الترتيب
+   */
+  getOrderExcelRank(order) {
+    if (!order) return 999999;
+    if (this.inventoryItems.length === 0 && this.skuRankMap.size === 0) return 999999;
+
+    let minRank = 999999;
+
+    // A. Check explicit order.sku
+    if (order.sku) {
+      const r = this.getSKURank(order.sku);
+      if (r !== 999999) minRank = Math.min(minRank, r);
+    }
+
+    // B. Scan notes & description for embedded alphanumeric SKU codes (e.g. ba014e2, Bb012E1, eb033y0)
+    const notesAndDesc = `${order.rawNotes || ''} ${order.rawDescription || ''} ${order.description || ''}`;
     if (notesAndDesc) {
       const tokens = notesAndDesc.match(/[a-zA-Z0-9_-]{5,15}/g);
       if (tokens) {
         for (const token of tokens) {
-          const prio = this.getSKUPriority(token);
-          if (prio !== 999999) return prio;
+          const r = this.getSKURank(token);
+          if (r !== 999999) {
+            minRank = Math.min(minRank, r);
+          }
         }
       }
     }
 
-    // If multi-product order, evaluate each product's SKU
-    if (Array.isArray(orderOrProduct.products) && orderOrProduct.products.length > 0) {
-      let minSkuIdx = 999999;
-      for (const p of orderOrProduct.products) {
-        if (p.sku) {
-          const prio = this.getSKUPriority(p.sku);
-          if (prio !== 999999) minSkuIdx = Math.min(minSkuIdx, prio);
-        }
-      }
-      if (minSkuIdx !== 999999) return minSkuIdx;
-    }
-
-    // 2. If no SKU is found, match order's product title, color, and size against productOrderMap:
-    const primaryProd = (Array.isArray(orderOrProduct.products) && orderOrProduct.products[0]) ? orderOrProduct.products[0] : null;
-    const model = orderOrProduct.modelName || (primaryProd ? primaryProd.modelName : '') || orderOrProduct.title || '';
-    const color = orderOrProduct.color || (primaryProd ? primaryProd.color : '') || '';
-    const size = orderOrProduct.size || (primaryProd ? primaryProd.size : '') || '';
-
-    // A) Exact composite: Title + Color + Size
-    const fullComposite = ArabicUtils.normalizeArabic(`${model} ${color} ${size}`);
-    if (fullComposite && this.productOrderMap.has(fullComposite)) {
-      return this.productOrderMap.get(fullComposite);
-    }
-
-    // B) Secondary: Title + Color
-    const titleColor = ArabicUtils.normalizeArabic(`${model} ${color}`);
-    if (titleColor && this.productOrderMap.has(titleColor)) {
-      return this.productOrderMap.get(titleColor);
-    }
-
-    // C) Tertiary: Title only
-    const titleOnly = ArabicUtils.normalizeArabic(model);
-    if (titleOnly && this.productOrderMap.has(titleOnly)) {
-      return this.productOrderMap.get(titleOnly);
-    }
-
-    // D) Evaluate each item in products array
-    if (Array.isArray(orderOrProduct.products) && orderOrProduct.products.length > 0) {
-      let minProdIdx = 999999;
-      for (const p of orderOrProduct.products) {
-        const pComposite = ArabicUtils.normalizeArabic(`${p.modelName} ${p.color || ''} ${p.size || ''}`);
-        if (this.productOrderMap.has(pComposite)) {
-          minProdIdx = Math.min(minProdIdx, this.productOrderMap.get(pComposite));
-          continue;
-        }
-        const pTC = ArabicUtils.normalizeArabic(`${p.modelName} ${p.color || ''}`);
-        if (this.productOrderMap.has(pTC)) {
-          minProdIdx = Math.min(minProdIdx, this.productOrderMap.get(pTC));
-          continue;
-        }
-        const pT = ArabicUtils.normalizeArabic(p.modelName);
-        if (this.productOrderMap.has(pT)) {
-          minProdIdx = Math.min(minProdIdx, this.productOrderMap.get(pT));
-        }
-      }
-      if (minProdIdx !== 999999) return minProdIdx;
-    }
-
-    // E) Substring matching fallback against productOrderMap
-    if (titleOnly) {
-      for (const [key, idx] of this.productOrderMap.entries()) {
-        if (key && (key.includes(titleOnly) || titleOnly.includes(key))) {
-          return idx;
+    // C. Check each item in order.products array
+    if (Array.isArray(order.products) && order.products.length > 0) {
+      for (const prod of order.products) {
+        const prodRank = this.getItemRank(prod);
+        if (prodRank !== 999999) {
+          minRank = Math.min(minRank, prodRank);
         }
       }
     }
 
-    return 999999;
+    // D. If still not matched, try smart title matching on primary product or order description
+    if (minRank === 999999) {
+      const primaryProd = (Array.isArray(order.products) && order.products[0]) ? order.products[0] : null;
+      const model = order.modelName || (primaryProd ? primaryProd.modelName : '') || order.title || '';
+      const color = order.color || (primaryProd ? primaryProd.color : '') || '';
+      const size = order.size || (primaryProd ? primaryProd.size : '') || '';
+
+      const composite = `${model} ${color} ${size}`.trim();
+      if (composite) {
+        const r = this.getTitleRank(composite);
+        if (r !== 999999) minRank = Math.min(minRank, r);
+      }
+
+      if (minRank === 999999 && model) {
+        const r = this.getTitleRank(model);
+        if (r !== 999999) minRank = Math.min(minRank, r);
+      }
+    }
+
+    return minRank;
+  },
+
+  /**
+   * Backwards-compatible alias for getOrderExcelRank
+   */
+  getWalkIndex(orderOrProduct) {
+    return this.getOrderExcelRank(orderOrProduct);
+  },
+
+  /**
+   * Checks whether an order or product is a carpet/prayer rug item
+   * Used for inserting a 100% blank separator page before carpets in single-piece orders
+   */
+  isCarpetItem(orderOrProduct) {
+    if (!orderOrProduct) return false;
+
+    // Check SKU prefixes for carpets (e.g. ea030, ea032, eb033)
+    const sku = (orderOrProduct.sku || '').toLowerCase();
+    if (sku.startsWith('ea03') || sku.startsWith('eb03')) return true;
+
+    // Check text for carpet keywords
+    const text = `${orderOrProduct.modelName || ''} ${orderOrProduct.title || ''} ${orderOrProduct.rawDescription || ''} ${orderOrProduct.fullNormalizedDesc || ''}`;
+    let norm = text;
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeArabic === 'function') {
+      norm = ArabicUtils.normalizeArabic(text);
+    }
+    if (norm.includes('سجاد') || norm.includes('سجاده')) {
+      return true;
+    }
+
+    // Check if rank belongs to carpet section (row >= 540 in sheet بعد الترتيب)
+    const rank = typeof orderOrProduct.excelRank === 'number'
+      ? orderOrProduct.excelRank
+      : this.getOrderExcelRank(orderOrProduct);
+    if (rank >= 540 && rank !== 999999) {
+      return true;
+    }
+
+    return false;
+  },
+
+  /**
+   * Match product with inventory record for enriching metadata
+   */
+  matchProduct(product) {
+    if (!product || this.inventoryItems.length === 0) return null;
+    if (product.sku) {
+      const upper = String(product.sku).trim().toUpperCase();
+      if (this.skuMap.has(upper)) return this.skuMap.get(upper);
+    }
+    const rank = this.getItemRank(product);
+    if (rank !== 999999 && rank < this.inventoryItems.length) {
+      return this.inventoryItems[rank];
+    }
+    return null;
   }
 };
 
-window.InventoryParser = InventoryParser;
+// Auto-initialize when loaded
+if (typeof window !== 'undefined') {
+  window.InventoryParser = InventoryParser;
+  // Initialize from localStorage or DEFAULT_INVENTORY_ITEMS if available
+  if (typeof document !== 'undefined' && document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => InventoryParser.init());
+  } else {
+    InventoryParser.init();
+  }
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { InventoryParser };
+}

@@ -87,17 +87,17 @@ const DemoGenerator = {
   ],
 
   sampleInventory: [
-    { Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'كشميري', 'Option2 Value': 'الأول', SKU: 'ba014e0' },
-    { Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'كشميري', 'Option2 Value': 'الثاني', SKU: 'ba014e1' },
-    { Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'كشميري', 'Option2 Value': 'الثالث', SKU: 'ba014e2' },
-    { Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'اسود', 'Option2 Value': 'الأول', SKU: 'ba014e3' },
-    { Handle: 'prayer-rug-printed', Title: 'سجادة صلاة قطيفة مطبوعة', 'Option1 Value': 'الأقصى', 'Option2 Value': 'قياسي', SKU: 'Ac055ca4' },
-    { Handle: 'prayer-rug-printed', Title: 'سجادة صلاة قطيفة مطبوعة', 'Option1 Value': 'مكة', 'Option2 Value': 'قياسي', SKU: 'Ac055ca5' },
-    { Handle: 'women-isdal-raqqa', Title: 'اسدال رقة حريمي', 'Option1 Value': 'كحلي', 'Option2 Value': 'L', SKU: 'fa099k1' },
-    { Handle: 'women-isdal-raqqa', Title: 'اسدال رقة حريمي', 'Option1 Value': 'اسود', 'Option2 Value': 'L', SKU: 'fa099k2' },
-    { Handle: 'women-isdal-raqqa', Title: 'اسدال رقة حريمي', 'Option1 Value': 'اسود', 'Option2 Value': 'XL', SKU: 'fa099k3' },
-    { Handle: 'women-prayer-set-plain', Title: 'طقم صلاة حريمي سادة', 'Option1 Value': 'زيتي', 'Option2 Value': 'M', SKU: 'eb033x0' },
-    { Handle: 'women-prayer-set-plain', Title: 'طقم صلاة حريمي سادة', 'Option1 Value': 'كشمير', 'Option2 Value': 'L', SKU: 'eb033x1' }
+    { 'الصنف': 'طقم الاميرات اطفالي كشميري الأول', Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'كشميري', 'Option2 Value': 'الأول', SKU: 'ba014e0' },
+    { 'الصنف': 'طقم الاميرات اطفالي كشميري الثاني', Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'كشميري', 'Option2 Value': 'الثاني', SKU: 'ba014e1' },
+    { 'الصنف': 'طقم الاميرات اطفالي كشميري الثالث', Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'كشميري', 'Option2 Value': 'الثالث', SKU: 'ba014e2' },
+    { 'الصنف': 'طقم الاميرات اطفالي اسود الأول', Handle: 'princess-set-kids', Title: 'طقم الاميرات اطفالي', 'Option1 Value': 'اسود', 'Option2 Value': 'الأول', SKU: 'ba014e3' },
+    { 'الصنف': 'سجادة صلاة قطيفة مطبوعة الأقصى', Handle: 'prayer-rug-printed', Title: 'سجادة صلاة قطيفة مطبوعة', 'Option1 Value': 'الأقصى', 'Option2 Value': 'قياسي', SKU: 'Ac055ca4' },
+    { 'الصنف': 'سجادة صلاة قطيفة مطبوعة مكة', Handle: 'prayer-rug-printed', Title: 'سجادة صلاة قطيفة مطبوعة', 'Option1 Value': 'مكة', 'Option2 Value': 'قياسي', SKU: 'Ac055ca5' },
+    { 'الصنف': 'اسدال رقة حريمي كحلي L', Handle: 'women-isdal-raqqa', Title: 'اسدال رقة حريمي', 'Option1 Value': 'كحلي', 'Option2 Value': 'L', SKU: 'fa099k1' },
+    { 'الصنف': 'اسدال رقة حريمي اسود L', Handle: 'women-isdal-raqqa', Title: 'اسدال رقة حريمي', 'Option1 Value': 'اسود', 'Option2 Value': 'L', SKU: 'fa099k2' },
+    { 'الصنف': 'اسدال رقة حريمي اسود XL', Handle: 'women-isdal-raqqa', Title: 'اسدال رقة حريمي', 'Option1 Value': 'اسود', 'Option2 Value': 'XL', SKU: 'fa099k3' },
+    { 'الصنف': 'طقم صلاة حريمي سادة زيتي M', Handle: 'women-prayer-set-plain', Title: 'طقم صلاة حريمي سادة', 'Option1 Value': 'زيتي', 'Option2 Value': 'M', SKU: 'eb033x0' },
+    { 'الصنف': 'طقم صلاة حريمي سادة كشمير L', Handle: 'women-prayer-set-plain', Title: 'طقم صلاة حريمي سادة', 'Option1 Value': 'كشمير', 'Option2 Value': 'L', SKU: 'eb033x1' }
   ],
 
   /**
@@ -264,7 +264,7 @@ const DemoGenerator = {
 
     const worksheet = XLSX.utils.json_to_sheet(this.sampleInventory);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'بعد الترتيب');
     const excelBytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     return excelBytes;
   }

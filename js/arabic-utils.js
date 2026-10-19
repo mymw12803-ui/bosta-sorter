@@ -336,15 +336,19 @@ const ArabicUtils = {
     return Array.from(discovered.values());
   },
 
-  // Helper to find the best route index (0 to 49) for any given product
+  // Helper to find the physical picking index (Rank 0..N) for any given product
   getWarehouseRouteRank(productDescription) {
+    if (typeof InventoryParser !== 'undefined' && typeof InventoryParser.getItemRank === 'function') {
+      const r = InventoryParser.getItemRank({ modelName: productDescription });
+      if (r !== 999999) return r;
+    }
     const norm = (productDescription || "")
       .replace(/[أإآ]/g, "ا")
       .replace(/ة/g, "ه")
       .replace(/ى/g, "ي")
       .replace(/\s+/g, "");
 
-    if (!norm) return 999;
+    if (!norm) return 999999;
 
     for (let i = 0; i < this.WAREHOUSE_ROUTE_SEQUENCE.length; i++) {
       const target = this.WAREHOUSE_ROUTE_SEQUENCE[i]
@@ -363,20 +367,23 @@ const ArabicUtils = {
     if (isCarpet) {
       if (norm.includes("وتربروف")) return 13;
       const isKids = norm.includes("اطفال") || norm.includes("اطفالي");
-      return isKids ? 48 : 49;
+      return isKids ? 543 : 542;
     }
 
-    return 999; // Fallback for unlisted items
+    return 999999; // Fallback for unlisted items
   },
 
   // Helper to compute route rank for an entire order (minimum route index among its items)
   getOrderRouteRank(order) {
-    if (!order) return 999;
+    if (!order) return 999999;
+    if (typeof InventoryParser !== 'undefined' && typeof InventoryParser.getOrderExcelRank === 'function') {
+      return InventoryParser.getOrderExcelRank(order);
+    }
     if (order.products && order.products.length > 0) {
       const ranks = order.products.map(p => {
         const desc = p.description || p.formattedLineText || p.rawLineText || p.modelName || '';
         let r = this.getWarehouseRouteRank(desc);
-        if (r === 999 && p.modelName) {
+        if (r === 999999 && p.modelName) {
           r = this.getWarehouseRouteRank(p.modelName);
         }
         return r;
@@ -1057,9 +1064,27 @@ const ArabicUtils = {
     // Detect embedded SKU in notes or products
     let sku = '';
     const fullNotesText = notesLines.join(' ');
-    const skuMatch = fullNotesText.match(/\b([a-zA-Z]{2}\d{3}[a-zA-Z0-9]{2,3})\b/i);
-    if (skuMatch) {
-      sku = skuMatch[1].toUpperCase();
+    
+    // 1. Try matching tokens against InventoryParser.skuRankMap
+    if (typeof InventoryParser !== 'undefined' && InventoryParser.skuRankMap && InventoryParser.skuRankMap.size > 0) {
+      const allText = `${fullNotesText} ${lines.join(' ')}`;
+      const tokens = allText.match(/[a-zA-Z0-9_-]{5,15}/g);
+      if (tokens) {
+        for (const token of tokens) {
+          if (InventoryParser.skuRankMap.has(token.toLowerCase())) {
+            sku = token.toUpperCase();
+            break;
+          }
+        }
+      }
+    }
+
+    // 2. Fallback regex
+    if (!sku) {
+      const skuMatch = fullNotesText.match(/\b([a-zA-Z]{2}\d{3}[a-zA-Z0-9]{1,4})\b/i);
+      if (skuMatch) {
+        sku = skuMatch[1].toUpperCase();
+      }
     }
 
     // PERMANENT FIX: 100% Reliable Category Detection (Kids vs Women vs Others)
@@ -1110,7 +1135,15 @@ const ArabicUtils = {
       totalPieces: piecesCount,
       totalPiecesInt: piecesCount,
       totalPiecesStr: totalPieces,
-      routeRank: this.getOrderRouteRank({ products, modelName: primaryProduct.modelName, rawDescription: products.map(p => p.raw).join('\n') }),
+      routeRank: (typeof InventoryParser !== 'undefined')
+        ? InventoryParser.getOrderExcelRank({ sku, products, modelName: primaryProduct.modelName, rawNotes: fullNotesText, rawDescription: products.map(p => p.raw).join('\n') })
+        : this.getOrderRouteRank({ products, modelName: primaryProduct.modelName, rawDescription: products.map(p => p.raw).join('\n') }),
+      excelRank: (typeof InventoryParser !== 'undefined')
+        ? InventoryParser.getOrderExcelRank({ sku, products, modelName: primaryProduct.modelName, rawNotes: fullNotesText, rawDescription: products.map(p => p.raw).join('\n') })
+        : 999999,
+      walkIndex: (typeof InventoryParser !== 'undefined')
+        ? InventoryParser.getOrderExcelRank({ sku, products, modelName: primaryProduct.modelName, rawNotes: fullNotesText, rawDescription: products.map(p => p.raw).join('\n') })
+        : 999999,
       city: city || 'مصر',
       products,
       isMultiProduct,

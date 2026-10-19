@@ -706,38 +706,39 @@ document.addEventListener('DOMContentLoaded', () => {
   let discoveredPdfProducts = [];
 
   function updateCatalogUI() {
-    const count = (typeof ArabicUtils !== 'undefined' && ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE)
-      ? ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE.length
-      : 50;
+    const count = (typeof InventoryParser !== 'undefined' && InventoryParser.inventoryItems)
+      ? InventoryParser.inventoryItems.length
+      : 546;
 
     if (elements.catalogStatusBadge) {
-      elements.catalogStatusBadge.textContent = `📊 الكتالوج النشط: ${count} صنفاً معتمداً`;
+      elements.catalogStatusBadge.textContent = `📊 الكتالوج المعتمد: ${count} صنفاً ورمز SKU`;
     }
     if (elements.catalogInfoText) {
-      elements.catalogInfoText.textContent = `الكتالوج النشط حالياً يضم ${count} صنف وموديل معتمد.`;
+      elements.catalogInfoText.textContent = `الكتالوج المعتمد حالياً يضم ${count} صنفاً ورمز SKU من شيت بعد الترتيب.`;
     }
     if (elements.catalogInspectorCount) {
-      elements.catalogInspectorCount.textContent = `${count} موديلاً`;
+      elements.catalogInspectorCount.textContent = `${count} موديلاً وSKU`;
     }
     const stratText = document.getElementById('active-strategy-text');
     if (stratText) {
-      stratText.textContent = `الترتيب النشط: عدد القطع تنازلياً ➔ مسار ممرات المخزن (${count} موديلاً معتمداً)`;
+      stratText.textContent = `الترتيب النشط: عدد القطع تنازلياً ➔ تسلسل شيت الـ SKU ومسار المخزن (${count} صنفاً معتمداً)`;
     }
     renderCatalogInspectorItems();
   }
 
   function renderCatalogInspectorItems(query = '') {
     if (!elements.catalogInspectorItems) return;
-    const items = (typeof ArabicUtils !== 'undefined' && ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE)
-      ? ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE
+    const items = (typeof InventoryParser !== 'undefined' && InventoryParser.inventoryItems)
+      ? InventoryParser.inventoryItems
       : [];
 
-    const normQuery = (query || '').trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
+    const normQuery = (query || '').trim().toLowerCase();
 
-    const filtered = items.map((item, idx) => ({ item, index: idx })).filter(entry => {
+    const filtered = items.filter(item => {
       if (!normQuery) return true;
-      const norm = entry.item.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, "");
-      return norm.includes(normQuery);
+      const title = (item.title || '').toLowerCase();
+      const sku = (item.sku || '').toLowerCase();
+      return title.includes(normQuery) || sku.includes(normQuery);
     });
 
     if (filtered.length === 0) {
@@ -749,32 +750,22 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    elements.catalogInspectorItems.innerHTML = filtered.map(entry => `
+    elements.catalogInspectorItems.innerHTML = filtered.slice(0, 100).map(item => `
       <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-xs hover:border-teal-500/40 transition">
         <div class="flex items-center gap-2 overflow-hidden">
-          <span class="w-5 h-5 rounded bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-            ${entry.index + 1}
+          <span class="w-6 h-6 rounded bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+            ${(item.index || 0) + 1}
           </span>
-          <span class="text-slate-200 truncate font-medium" title="${entry.item}">
-            ${entry.item}
-          </span>
+          <div class="truncate">
+            <span class="text-slate-200 truncate font-medium block" title="${item.title}">
+              ${item.title}
+            </span>
+            ${item.sku ? `<span class="text-[10px] font-mono text-teal-400 block">${item.sku}</span>` : ''}
+          </div>
         </div>
-        <button class="remove-catalog-item-btn p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-slate-800 transition shrink-0 mr-1" title="حذف من المسار" onclick="removeCatalogItem(${entry.index})">
-          ✕
-        </button>
       </div>
-    `).join('');
+    `).join('') + (filtered.length > 100 ? `<div class="col-span-full text-center text-[10px] text-slate-500 py-1">عرض أول 100 صنف من أصل ${filtered.length} صنف</div>` : '');
   }
-
-  window.removeCatalogItem = function(index) {
-    if (typeof ArabicUtils === 'undefined') return;
-    const res = ArabicUtils.removeProductFromCatalog(index);
-    if (res.removed) {
-      showToast(`تم حذف (${res.removed}) من مسار ممرات المخزن. المتبقي: ${res.totalRouteCount}`, 'info');
-      updateCatalogUI();
-      if (state.extractedPages.length > 0) reSortAndRender();
-    }
-  };
 
   // Toggle Accordion for Catalog Manager
   if (elements.toggleCatalogManagerBtn && elements.catalogManagerContent) {
@@ -814,16 +805,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Reset catalog to 50 defaults
+  // Reset catalog to default 546 items from sheet بعد الترتيب
   if (elements.catalogResetBtn) {
     elements.catalogResetBtn.addEventListener('click', () => {
-      if (confirm('هل أنت متأكد من رغبتك في استعادة قائمة ممرات المخزن الافتراضية (50 موديلاً) وحذف أي إضافات مخصصة؟')) {
-        ArabicUtils.resetCatalogToDefault();
+      if (confirm('هل أنت متأكد من رغبتك في استعادة الكتالوج الافتراضي المعتمد (546 صنفاً من شيت بعد الترتيب)؟')) {
+        const res = InventoryParser.resetToDefaultCatalog();
         updateCatalogUI();
         if (elements.catalogExcelResult) elements.catalogExcelResult.classList.add('hidden');
-        if (elements.catalogDiscoveredSection) elements.catalogDiscoveredSection.classList.add('hidden');
         if (state.extractedPages.length > 0) reSortAndRender();
-        showToast('تمت استعادة كتالوج ممرات المخزن الافتراضي المعتمد (50 موديلاً).', 'success');
+        showToast(`تمت استعادة الكتالوج الافتراضي المعتمد (${res.totalItems} صنفاً).`, 'success');
       }
     });
   }
@@ -831,10 +821,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Export current catalog as CSV
   if (elements.catalogExportBtn) {
     elements.catalogExportBtn.addEventListener('click', () => {
-      const items = ArabicUtils.WAREHOUSE_ROUTE_SEQUENCE || [];
-      const lines = ['Sequence_Rank,Model_Name'];
+      const items = (typeof InventoryParser !== 'undefined' && InventoryParser.inventoryItems)
+        ? InventoryParser.inventoryItems
+        : [];
+      const lines = ['Row_Index,Title,SKU,Color,Size'];
       items.forEach((item, idx) => {
-        lines.push(`${idx + 1},"${item.replace(/"/g, '""')}"`);
+        const title = (item.title || '').replace(/"/g, '""');
+        const sku = (item.sku || '').replace(/"/g, '""');
+        const color = (item.color || '').replace(/"/g, '""');
+        const size = (item.size || '').replace(/"/g, '""');
+        lines.push(`${idx + 1},"${title}","${sku}","${color}","${size}"`);
       });
       const csvContent = '\uFEFF' + lines.join('\n'); // BOM for Arabic Excel
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -842,12 +838,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const a = document.createElement('a');
       const today = new Date().toISOString().slice(0, 10);
       a.href = url;
-      a.download = `Warehouse_Route_Catalog_${today}.csv`;
+      a.download = `Warehouse_SKU_Inventory_${today}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      showToast('تم تصدير كتالوج ممرات المخزن كملف CSV بنجاح!', 'success');
+      showToast('تم تصدير كتالوج ممرات المخزن والـ SKU كملف CSV بنجاح!', 'success');
     });
   }
 
@@ -887,58 +883,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
-
-      if (!rawRows || rawRows.length === 0) {
-        showToast('الملف المرفوع فارغ ولا يحتوي على صفوف بيانات.', 'error');
-        return;
-      }
-
-      const extractedTitles = [];
-      const titleAliases = ['title', 'اسم المنتج', 'اسم الموديل', 'المنتج', 'product name', 'handle', 'item'];
-
-      for (const row of rawRows) {
-        let foundTitle = '';
-        for (const k of Object.keys(row)) {
-          const lk = k.trim().toLowerCase();
-          if (titleAliases.some(alias => lk.includes(alias))) {
-            const val = String(row[k] || '').trim();
-            if (val && val.length >= 3) {
-              foundTitle = val;
-              break;
-            }
-          }
-        }
-        if (foundTitle) {
-          extractedTitles.push(foundTitle);
-        }
-      }
-
-      if (extractedTitles.length === 0) {
-        showToast('لم يتم العثور على عمود يحمل أسماء المنتجات (Title / اسم المنتج).', 'error');
-        return;
-      }
-
-      const res = ArabicUtils.addProductsToCatalog(extractedTitles, true);
+      const res = await InventoryParser.parseFile(buffer);
       updateCatalogUI();
       if (state.extractedPages.length > 0) reSortAndRender();
 
       if (elements.catalogExcelResult) {
         elements.catalogExcelResult.classList.remove('hidden');
         elements.catalogExcelResult.innerHTML = `
-          <div class="font-bold mb-0.5">✅ نتيجة فحص ودمج ملف الشيت (${file.name}):</div>
-          <div>تم فحص ${extractedTitles.length} صنف، وإضافة ${res.addedCount} موديل جديد إلى مسار المخزن!</div>
-          <div class="text-[10px] text-emerald-400 mt-0.5">إجمالي كتالوج المخزن النشط حالياً: ${res.totalRouteCount} صنف معتمد (تم الحفظ في المتصفح).</div>
+          <div class="font-bold mb-0.5">✅ تم تحديث مسار المخزن بنجاح (${file.name}):</div>
+          <div>تمت قراءة ورقة [${res.sheetName || 'بعد الترتيب'}] وتحديث ${res.totalItems} صنفاً و ${res.uniqueSkus} رمز SKU!</div>
+          <div class="text-[10px] text-emerald-400 mt-0.5">تم حفظ المسار الجديد في ذاكرة المتصفح (localStorage) ليعتمد تلقائياً في كل عملية فرز.</div>
         `;
       }
 
-      if (res.addedCount > 0) {
-        showToast(`تمت إضافة ${res.addedCount} موديل جديد لمسار المخزن بنجاح!`, 'success');
-      } else {
-        showToast(`جميع أصناف الملف (${res.totalRouteCount}) موجودة بالفعل في كتالوج المخزن.`, 'info');
-      }
+      showToast(`تم تحديث مسار المخزن (${res.totalItems} صنفاً و ${res.uniqueSkus} SKU) وحفظه في المتصفح!`, 'success');
     } catch (err) {
       console.error('Catalog Excel error:', err);
       showToast(`فشل قراءة ملف الإكسيل/CSV: ${err.message || err}`, 'error');
@@ -2017,14 +1975,15 @@ document.addEventListener('DOMContentLoaded', () => {
     state.inventoryArrayBuffer = null;
     state.extractedPages = [];
     state.sortedPages = [];
-    InventoryParser.reset();
+    InventoryParser.init();
+    updateCatalogUI();
 
     elements.pdfInput.value = '';
     elements.inventoryInput.value = '';
     elements.pdfFileInfo.classList.add('hidden');
     elements.inventoryFileInfo.classList.add('hidden');
     if (elements.inventoryStatusPill) {
-      elements.inventoryStatusPill.textContent = 'اختياري';
+      elements.inventoryStatusPill.textContent = `معتمد (${InventoryParser.inventoryItems.length} صنفاً)`;
       elements.inventoryStatusPill.className = 'text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium transition';
     }
     elements.pdfDropzone.querySelector('.dropzone-prompt').classList.remove('hidden');

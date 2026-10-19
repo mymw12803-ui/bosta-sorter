@@ -24,60 +24,28 @@ const PDFProcessor = {
     }
   },
 
-  // Helper to find the best route index (0 to 49) for any given product
+  // Helper to find the physical picking index (Rank 0..N) for any given product
   getWarehouseRouteRank(productDescription) {
+    if (typeof InventoryParser !== 'undefined' && typeof InventoryParser.getItemRank === 'function') {
+      const r = InventoryParser.getItemRank({ modelName: productDescription });
+      if (r !== 999999) return r;
+    }
     if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.getWarehouseRouteRank === 'function') {
       return ArabicUtils.getWarehouseRouteRank(productDescription);
     }
-    const norm = (productDescription || "")
-      .replace(/[أإآ]/g, "ا")
-      .replace(/ة/g, "ه")
-      .replace(/ى/g, "ي")
-      .replace(/\s+/g, "");
-
-    if (!norm) return 999;
-
-    for (let i = 0; i < this.WAREHOUSE_ROUTE_SEQUENCE.length; i++) {
-      const target = this.WAREHOUSE_ROUTE_SEQUENCE[i]
-        .replace(/[أإآ]/g, "ا")
-        .replace(/ة/g, "ه")
-        .replace(/ى/g, "ي")
-        .replace(/\s+/g, "");
-
-      if (norm.includes(target) || target.includes(norm)) {
-        return i;
-      }
-    }
-
-    const isCarpet = norm.includes("سجاد") || norm.includes("سجاده");
-    if (isCarpet) {
-      if (norm.includes("وتربروف")) return 13;
-      const isKids = norm.includes("اطفال") || norm.includes("اطفالي");
-      return isKids ? 48 : 49;
-    }
-
-    return 999;
+    return 999999;
   },
 
-  // Helper to compute route rank for an entire order (minimum route index among its items)
+  // Helper to compute physical picking rank for an entire order (minimum SKU/item rank)
   getOrderRouteRank(order) {
-    if (!order) return 999;
+    if (!order) return 999999;
+    if (typeof InventoryParser !== 'undefined' && typeof InventoryParser.getOrderExcelRank === 'function') {
+      return InventoryParser.getOrderExcelRank(order);
+    }
     if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.getOrderRouteRank === 'function') {
       return ArabicUtils.getOrderRouteRank(order);
     }
-    if (order.products && order.products.length > 0) {
-      const ranks = order.products.map(p => {
-        const desc = p.description || p.formattedLineText || p.rawLineText || p.modelName || '';
-        let r = this.getWarehouseRouteRank(desc);
-        if (r === 999 && p.modelName) {
-          r = this.getWarehouseRouteRank(p.modelName);
-        }
-        return r;
-      });
-      return Math.min(...ranks);
-    }
-    const fallbackDesc = order.description || order.modelName || order.rawDescription || '';
-    return this.getWarehouseRouteRank(fallbackDesc);
+    return 999999;
   },
 
   /**
@@ -297,14 +265,17 @@ const PDFProcessor = {
     }
     const useWalkSequence = opts.useWalkSequence !== false;
 
-    // Pre-calculate pieces count and routeRank for stability
+    // Pre-calculate pieces count and Master Excel Rank for stability
     for (const item of list) {
       const count = typeof item.totalPieces === 'number'
         ? item.totalPieces
         : (item.piecesCount || item.totalItemsCount || parseInt(item.totalPieces, 10) || 1);
       item.piecesCount = count;
       item.totalPieces = count;
-      item.routeRank = typeof item.routeRank === 'number' ? item.routeRank : this.getOrderRouteRank(item);
+      item.excelRank = (typeof InventoryParser !== 'undefined')
+        ? InventoryParser.getOrderExcelRank(item)
+        : this.getOrderRouteRank(item);
+      item.routeRank = item.excelRank;
     }
 
     list.sort((a, b) => {
@@ -315,32 +286,25 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Level 1 (Primary - Mandatory): Total Pieces Count Descending
-      // Group A (3+ pieces descending: 8, 7, 6, 5, 4, 3...) -> Group B (2 pieces) -> Group C (1 piece)
+      // Tier 1 (Mandatory & Primary): Total Pieces Count Descending
+      // Group 1: Large Orders (3+ pieces descending: 8, 7, 6, 5, 4, 3...)
+      // Group 2: Two-Piece Orders (2 pieces)
+      // Group 3: Single-Piece Orders (1 piece) at the very end of the print file
       const countA = a.piecesCount || 1;
       const countB = b.piecesCount || 1;
       if (countB !== countA) {
         return countB - countA;
       }
 
-      // Level 2 (Secondary): Master Route Sequence (0 to 49)
-      // Single-piece: route rank of product (0 to 49)
-      // Multi-piece: minimum route rank among order items (earliest aisle encounter)
-      const rankA = typeof a.routeRank === 'number' ? a.routeRank : 999;
-      const rankB = typeof b.routeRank === 'number' ? b.routeRank : 999;
+      // Tier 2 (Secondary): Master Excel SKU Sequence Rank (0 to N from sheet بعد الترتيب)
+      // Maps each SKU or item text to physical warehouse picking aisle order
+      const rankA = typeof a.excelRank === 'number' ? a.excelRank : 999999;
+      const rankB = typeof b.excelRank === 'number' ? b.excelRank : 999999;
       if (rankA !== rankB) {
         return rankA - rankB;
       }
 
-      // Level 3 (Optional): If an Inventory CSV/SKU sheet is uploaded:
-      // Use uploaded CSV row sequence as tie-breaker within identical route ranks
-      if (useWalkSequence) {
-        const walkA = typeof a.walkIndex === 'number' ? a.walkIndex : 999999;
-        const walkB = typeof b.walkIndex === 'number' ? b.walkIndex : 999999;
-        if (walkA !== walkB) return walkA - walkB;
-      }
-
-      // Tie Breakers:
+      // Tie Breakers within identical piece count and Excel row rank:
       // Model Name
       const modelA = a.normalizedModel || a.modelName || '';
       const modelB = b.normalizedModel || b.modelName || '';
@@ -1044,20 +1008,22 @@ const PDFProcessor = {
       }
 
       // 3. Single-Piece Orders (1 piece):
-      // No batch pick-lists. Maintain sequential route order from #1 (تلبيسه اطفالي) to #50 (سجاد حريمي).
-      // Insert a blank separator page between major sections (before prayer rugs / carpets: rank >= 48).
+      // No batch pick-lists. Maintain sequential Excel rank order (Rank 0..N).
+      // Insert a 100% blank separator page before entering carpets/prayer rugs section.
       if (singleOrders.length > 0) {
         let carpetSeparatorInserted = false;
         let nonCarpetPrinted = false;
 
         for (const order of singleOrders) {
-          const rank = typeof order.routeRank === 'number' ? order.routeRank : this.getOrderRouteRank(order);
-          // Insert a 100% blank separator page before entering carpets/prayer rugs (ranks 48 and 49)
-          if (!carpetSeparatorInserted && rank >= 48 && nonCarpetPrinted) {
+          const isCarpet = (typeof InventoryParser !== 'undefined' && typeof InventoryParser.isCarpetItem === 'function')
+            ? InventoryParser.isCarpetItem(order)
+            : (order.fullNormalizedDesc || '').includes('سجاد');
+
+          if (!carpetSeparatorInserted && isCarpet && nonCarpetPrinted) {
             outDoc.addPage([212.60, 354.33]);
             carpetSeparatorInserted = true;
           }
-          if (rank < 48) {
+          if (!isCarpet) {
             nonCarpetPrinted = true;
           }
           await addOrderLabels([order]);
