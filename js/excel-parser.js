@@ -431,6 +431,37 @@ const InventoryParser = {
   },
 
   /**
+   * Checks whether an order or product is a non-pocket regular prayer rug (rug_regular)
+   */
+  isRegularRug(orderOrProduct) {
+    if (!orderOrProduct) return false;
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.isRegularRugItem === 'function') {
+      return ArabicUtils.isRegularRugItem(orderOrProduct);
+    }
+    const text = `${orderOrProduct.modelName || ''} ${orderOrProduct.title || ''} ${orderOrProduct.rawDescription || ''} ${orderOrProduct.fullNormalizedDesc || ''}`;
+    const norm = (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeArabic === 'function')
+      ? ArabicUtils.normalizeArabic(text)
+      : text.replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, '');
+    const isWaterproof = norm.includes('وتر') || norm.includes('بروف') || norm.includes('بطانه') || norm.includes('جيب');
+    return (norm.includes('سجاد') || norm.includes('سجاده')) && !isWaterproof;
+  },
+
+  /**
+   * Checks whether an order or product is in the Pocket & Waterproof group (pocket_waterproof)
+   */
+  isPocketWaterproof(orderOrProduct) {
+    if (!orderOrProduct) return false;
+    if (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.isPocketWaterproofItem === 'function') {
+      return ArabicUtils.isPocketWaterproofItem(orderOrProduct);
+    }
+    const text = `${orderOrProduct.modelName || ''} ${orderOrProduct.title || ''} ${orderOrProduct.rawDescription || ''} ${orderOrProduct.fullNormalizedDesc || ''}`;
+    const norm = (typeof ArabicUtils !== 'undefined' && typeof ArabicUtils.normalizeArabic === 'function')
+      ? ArabicUtils.normalizeArabic(text)
+      : text.replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, '');
+    return norm.includes('وتر') || norm.includes('بروف') || norm.includes('بطانه') || norm.includes('سجاده جيب') || norm.includes('سجادة جيب');
+  },
+
+  /**
    * Checks whether an order or product is a carpet/prayer rug item
    * Used for inserting a 100% blank separator page before carpets in single-piece orders
    */

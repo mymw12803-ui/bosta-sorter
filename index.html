@@ -334,7 +334,7 @@
           </div>
           <div>
             <div class="text-xs font-bold text-white group-hover:text-teal-300 transition">الترتيب الذكي لمسار المخزن</div>
-            <div class="text-[11px] text-slate-400 mt-0.5 leading-tight">الكبير (3+) ➔ قطعتين (2) ➔ الوحائد (حريمي ثم أطفالي)</div>
+            <div class="text-[11px] text-slate-400 mt-0.5 leading-tight">الكبير (3+) ➔ قطعتين (2) ➔ الوحائد (الملابس ➔ السجاد العادي ➔ الجيب والوتربروف في النهاية)</div>
           </div>
         </label>
 
@@ -346,7 +346,7 @@
           </div>
           <div>
             <div class="text-xs font-bold text-white group-hover:text-teal-300 transition">صفحات بيضاء فاصلة</div>
-            <div class="text-[11px] text-slate-400 mt-0.5 leading-tight">فواصل بيضاء بين الفئات والدفعات لتسهيل الفرز الميداني</div>
+            <div class="text-[11px] text-slate-400 mt-0.5 leading-tight">فواصل بيضاء بين الفئات (3+، قطعتين، الملابس، السجاد، الجيب والوتربروف)</div>
           </div>
         </label>
 
@@ -549,18 +549,16 @@
               </div>
             </label>
 
-            <!-- Toggle 2: Auto-Batching Pick Lists & Separators -->
+            <!-- Toggle 2: Blank Separators Between Major Groups -->
             <label class="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950/70 border border-teal-500/30 hover:border-teal-500/50 cursor-pointer transition">
               <input type="checkbox" id="batch-picklists-toggle" checked class="w-4 h-4 mt-0.5 text-teal-500 rounded border-slate-700 focus:ring-teal-500 focus:ring-offset-slate-900">
               <div>
                 <span class="text-xs font-bold text-white flex items-center gap-1.5">
-                  <span>📦 تفعيل بطاقات تجميع الدفعات والصفحات البيضاء الفاصلة (موصى به للمخزن)</span>
+                  <span>📄 صفحات بيضاء فاصلة بين المجموعات الرئيسية (موصى به للمخزن)</span>
                   <span class="bg-amber-500/20 text-amber-300 text-[10px] px-1.5 py-0.2 rounded font-mono">75×125 mm</span>
                 </span>
                 <span class="text-[11px] text-slate-400 block mt-0.5 leading-relaxed">
-                  • <b>الأوردرات الكبرى (3+ قطع):</b> تجميع في دفعات حتى 30 قطعة + بطاقة تجميع الأصناف والـ SKU + صفحة بيضاء.<br>
-                  • <b>أوردرات القطعتين:</b> تجميع في دفعات حتى 10 قطع (5 أوردرات) + بطاقة تجميع + صفحة بيضاء.<br>
-                  • <b>أوردرات القطعة الواحدة (الوحايد):</b> لا يتم طباعة بطاقة تجميع ولا صفحات بيضاء داخلها (مباشرة قطعة بقطعة).
+                  فواصل بيضاء نقية بين فئات الأوردرات (الكبير 3+ ➔ القطعتين 2 ➔ أوردرات القطعة الواحدة ➔ السجاد) لتسهيل الفرز الميداني دون أي بطاقات صغيرة داخل بوالص الشحن.
                 </span>
               </div>
             </label>
@@ -868,16 +866,16 @@
                 </div>
               </label>
 
-              <!-- Batch Pick-Lists & Separators Toggle (Panel) -->
+              <!-- Blank Separators Toggle (Panel) -->
               <label class="flex items-start gap-2.5 cursor-pointer pt-2 border-t border-slate-800">
                 <input type="checkbox" id="panel-batch-picklists-toggle" checked class="w-4 h-4 mt-0.5 text-teal-500 rounded border-slate-700 focus:ring-teal-500">
                 <div>
                   <span class="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>📄 بطاقات تجميع الدفعات والصفحات البيضاء الفاصلة</span>
+                    <span>📄 صفحات بيضاء فاصلة بين المجموعات الرئيسية</span>
                     <span class="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded font-mono">75×125 mm</span>
                   </span>
                   <span class="text-[11px] text-slate-400 block mt-0.5">
-                    إدراج بطاقة تجميع الأصناف + صفحة بيضاء فاصلة بعد كل دفعة (حتى 30 قطعة للكبرى، وحتى 10 قطع للقطعتين)، وأوردرات القطعة الواحدة مباشرة دون بطاقات أو فواصل.
+                    إدراج صفحة بيضاء فاصلة بين المجموعات الرئيسية (الكبير 3+ ➔ قطعتين 2 ➔ الوحائد والسجاد) لتنظيم الطباعة الميدانية دون أي بطاقات صغيرة داخل بوالص الشحن.
                   </span>
                 </div>
               </label>
@@ -969,7 +967,15 @@
               <span>تحميل نتائج الفلتر الحالي (<span id="filtered-download-count">0</span> بوليصة)</span>
             </button>
 
-            <!-- Top Download Action (Full PDF) -->
+            <!-- Dedicated A4 Pick-List & Customer Directory Button (Strictly NO SKU) -->
+            <button id="download-a4-picklist-btn" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-emerald-900/30 whitespace-nowrap">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>📄 تحميل كشف التجهيز والعملاء (A4 PDF منفصل - بدون SKU)</span>
+            </button>
+
+            <!-- Top Download Action (Full Labels PDF) -->
             <button id="download-top-btn" class="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-rose-900/30 whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -1027,12 +1033,19 @@
         </div>
       </div>
 
-      <button id="download-sticky-btn" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-sm shadow-xl shadow-rose-950/40 transition flex items-center justify-center gap-2">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-        </svg>
-        <span>تحميل ملف الـ PDF المرتب والجاهز للطباعة (75×125 ملم)</span>
-      </button>
+      <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+        <button id="download-a4-sticky-btn" class="w-full sm:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-xs shadow-xl shadow-teal-950/40 transition flex items-center justify-center gap-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          <span>كشف التجهيز والعملاء (A4 - بدون SKU)</span>
+        </button>
+
+        <button id="download-sticky-btn" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-sm shadow-xl shadow-rose-950/40 transition flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          <span>تحميل ملف البوالص المرتبة (75×125 ملم)</span>
+        </button>
+      </div>
     </div>
   </div>
 

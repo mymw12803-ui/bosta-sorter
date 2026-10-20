@@ -6,160 +6,96 @@
  */
 
 const ArabicUtils = {
-  // Built-in Warehouse Master Catalog (55 official products from Shopify inventory)
-  // Built-in Warehouse Master Catalog Defaults (55 official products from Shopify inventory)
-  DEFAULT_WAREHOUSE_TITLES: [
-    "اسدال رقة اطفالي", "اسدال رقة حريمي", "اسدال مشجر اطفالي", "جيبة بطانة",
-    "خمار مشجر بأكمام", "ملحفة صلاة مشجرة", "ملحفه جيب وتر بروف", "توتي باج",
-    "اسدال بخمار أطفالي مشجر", "اسدال زهرة", "طقم صلاه فسكوز حريمي", "اسدال عباية",
-    "خمار بدون اكمام سادة", "سجادة صلاة اطفالي صغيرة", "خمار بيليسيه اطفالي",
-    "خمار بيليسيه حريمي", "اسدال بخمار حريمي مشجر", "خمار مشجر بدون اكمام",
-    "اسدال مشجر", "جيبه صلاه فيسكوز", "خمار زبدة", "سجادة الهدي قطيفة",
-    "اسدال فراشة", "اسدال بكشكشة", "ملحفه صلاه سادة", "اسدال فسكوز مشجر",
-    "سجادة صلاة قطيفة مطبوعة", "سجادة صلاة اطفالي قطيفة", "اسدال بجيوب حريمي",
-    "اسدال شريطه", "اسدال جوبير حريمي", "اسدال بنس حريمي", "اسدال بخمار حريمي سادة",
-    "اسدال وقار سادة", "خمار بأكمام سادة", "جيبه صلاه ليكرا", "سجادة جيب",
-    "طقم جيب وتر بروف", "جيبة صلاة وتر بروف", "طقم صلاه حريمي سادة",
-    "طقم الاميرات حريمي", "طقم صلاه حريمي مشجر", "اسدال تلبيسه حريمي",
-    "اسدال بخمار أطفالي", "اسدال مطرز", "اسدال بنس اطفالي", "طقم الاميرات اطفالي",
-    "طقم صلاه اطفالي ساده", "طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات",
-    "اسدال جوبير اطفالي", "شنطة تهادوا تحابوا", "طقم صلاه حريمي قطعتين لون كشميري فراشات",
-    "اسدال بجيوب اطفالي", "اسدال تلبيسه اطفالي"
+  // Master Warehouse Shelf Catalog (from official layout document بلا عنوان (1).pdf & inventory_export_1.csv)
+  WAREHOUSE_SHELF_CATALOG: [
+    // --- قسم الأطفالي (Kids Shelf Sequence) ---
+    { id: 101, canonical: "اسدال تلبيسه اطفالي", keywords: ["تلبيسه اطفالي", "تلبيسه يلافطا"], dept: "kids" },
+    { id: 102, canonical: "اسدال بنس اطفالي", keywords: ["بنس اطفالي"], dept: "kids" },
+    { id: 103, canonical: "طقم الاميرات اطفالي", keywords: ["اميرات اطفالي", "الاميرات اطفالي"], dept: "kids" },
+    { id: 104, canonical: "اسدال بخمار اطفالي مشجر", keywords: ["بخمار اطفالي مشجر"], dept: "kids" },
+    { id: 105, canonical: "اسدال بخمار اطفالي سادة", keywords: ["بخمار اطفالي"], dept: "kids" },
+    { id: 106, canonical: "اسدال رقة اطفالي", keywords: ["رقه اطفالي"], dept: "kids" },
+    { id: 107, canonical: "خمار بيليسيه اطفالي", keywords: ["بيليسيه اطفالي"], dept: "kids" },
+    { id: 108, canonical: "اسدال جوبير اطفالي", keywords: ["جوبير اطفالي"], dept: "kids" },
+    { id: 109, canonical: "اسدال مشجر اطفالي", keywords: ["اسدال مشجر اطفالي"], dept: "kids" },
+    { id: 110, canonical: "اسدال بجيوب اطفالي", keywords: ["بجيوب اطفالي", "جيوب اطفالي"], dept: "kids" },
+
+    // --- قسم الحريمي والخمارات وأطقم الصلاة (Women & Prayer Sets Shelf Sequence) ---
+    { id: 201, canonical: "اسدال مشجر حريمي", keywords: ["اسدال مشجر حريمي", "فسكوز مشجر", "اسدال مشجر"], dept: "women" },
+    { id: 202, canonical: "ملحفه صلاه سادة", keywords: ["ملحفه صلاه ساده", "ملحفه صلاه فسكوز ساده"], dept: "women" },
+    { id: 203, canonical: "ملحفة صلاة مشجرة", keywords: ["ملحفه صلاه مشجره", "ملحفه صلاه فسكوز مشجر"], dept: "women" },
+    { id: 204, canonical: "خمار بيليسيه حريمي", keywords: ["خمار بيليسيه حريمي", "خمار بيليسيه"], dept: "women" },
+    { id: 205, canonical: "خمار مشجر بدون اكمام", keywords: ["بدون اكمام مشجر", "مشجر بدون اكمام"], dept: "women" },
+    { id: 206, canonical: "خمار بدون اكمام سادة", keywords: ["بدون اكمام ساده", "خمار زبده"], dept: "women" },
+    { id: 207, canonical: "خمار مشجر بأكمام", keywords: ["خمار مشجر باكمام"], dept: "women" },
+    { id: 208, canonical: "خمار بأكمام سادة", keywords: ["خمار باكمام ساده"], dept: "women" },
+    { id: 209, canonical: "اسدال بجيوب حريمي", keywords: ["بجيوب حريمي"], dept: "women" },
+    { id: 210, canonical: "طقم صلاه فسكوز حريمي", keywords: ["طقم صلاه فسكوز"], dept: "women" },
+    { id: 211, canonical: "اسدال بخمار حريمي مشجر", keywords: ["بخمار حريمي مشجر"], dept: "women" },
+    { id: 212, canonical: "اسدال بخمار حريمي سادة", keywords: ["بخمار حريمي ساده", "بخمار حريمي"], dept: "women" },
+    { id: 213, canonical: "اسدال رقة حريمي", keywords: ["رقه حريمي"], dept: "women" },
+    { id: 214, canonical: "اسدال بكشكشة", keywords: ["بكشكشه", "كشكشه"], dept: "women" },
+    { id: 215, canonical: "اسدال بنس حريمي", keywords: ["بنس حريمي"], dept: "women" },
+    { id: 216, canonical: "طقم الاميرات حريمي", keywords: ["اميرات حريمي", "الاميرات حريمي"], dept: "women" },
+    { id: 217, canonical: "اسدال شريطه", keywords: ["شريطه حريمي", "شريطه"], dept: "women" },
+    { id: 218, canonical: "اسدال مطرز", keywords: ["مطرز"], dept: "women" },
+    { id: 219, canonical: "اسدال جوبير حريمي", keywords: ["جوبير حريمي"], dept: "women" },
+    { id: 220, canonical: "اسدال تلبيسه حريمي", keywords: ["تلبيسه حريمي"], dept: "women" },
+    { id: 221, canonical: "اسدال وقار سادة", keywords: ["وقار"], dept: "women" },
+    { id: 222, canonical: "اسدال عباية", keywords: ["عبايه"], dept: "women" },
+    { id: 223, canonical: "اسدال زهرة", keywords: ["زهره"], dept: "women" },
+    { id: 224, canonical: "اسدال فراشة", keywords: ["فراشه"], dept: "women" },
+    { id: 225, canonical: "جيبه صلاه فيسكوز", keywords: ["جيبه فسكوز", "جيبه صلاه فيسكوز"], dept: "women" },
+    { id: 226, canonical: "طقم صلاه حريمي مشجر", keywords: ["طقم صلاه حريمي مشجر", "طقم صلاه حريمي قطعتين"], dept: "women" },
+    { id: 227, canonical: "طقم صلاه حريمي سادة", keywords: ["طقم صلاه حريمي ساده"], dept: "women" },
+
+    // --- أطقم صلاة أطفالي مرتبة بالمقاس (4 ثم 3 ثم 2 ثم 1 - مشجر ثم سادة) ---
+    { id: 301, canonical: "طقم صلاه اطفالي مشجر", sizeFilter: "الرابع", keywords: ["طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات"], dept: "kids" },
+    { id: 302, canonical: "طقم صلاه اطفالي ساده", sizeFilter: "الرابع", keywords: ["طقم صلاه اطفالي ساده"], dept: "kids" },
+    { id: 303, canonical: "طقم صلاه اطفالي مشجر", sizeFilter: "الثالث", keywords: ["طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات"], dept: "kids" },
+    { id: 304, canonical: "طقم صلاه اطفالي ساده", sizeFilter: "الثالث", keywords: ["طقم صلاه اطفالي ساده"], dept: "kids" },
+    { id: 305, canonical: "طقم صلاه اطفالي مشجر", sizeFilter: "الثاني", keywords: ["طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات"], dept: "kids" },
+    { id: 306, canonical: "طقم صلاه اطفالي ساده", sizeFilter: "الثاني", keywords: ["طقم صلاه اطفالي ساده"], dept: "kids" },
+    { id: 307, canonical: "طقم صلاه اطفالي مشجر", sizeFilter: "الاول", keywords: ["طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات"], dept: "kids" },
+    { id: 308, canonical: "طقم صلاه اطفالي ساده", sizeFilter: "الاول", keywords: ["طقم صلاه اطفالي ساده"], dept: "kids" },
+    { id: 309, canonical: "جيبه صلاه ليكرا", keywords: ["جيبه صلاه ليكرا", "ليكرا"], dept: "women" },
+
+    // --- قسم السجاد العادي (Non-Pocket Prayer Rugs) ---
+    { id: 401, canonical: "سجادة صلاة اطفالي قطيفة", keywords: ["سجاده صلاه اطفالي قطيفه", "سجاد اطفالي", "سجاده صلاه اطفالي صغيره"], dept: "rug_regular" },
+    { id: 402, canonical: "سجادة صلاة قطيفة مطبوعة", keywords: ["سجاده صلاه قطيفه مطبوعه", "سجاد حريمي", "سجاده الهدي قطيفه"], dept: "rug_regular" },
+
+    // --- قسم الجيب ووتر بروف (Pocket & Waterproof Group - Placed at the VERY END) ---
+    { id: 501, canonical: "طقم جيب وتر بروف", keywords: ["طقم وتر بروف", "طقم جيب وتر بروف"], dept: "pocket_waterproof" },
+    { id: 502, canonical: "جيبة صلاة وتر بروف", keywords: ["جيبه وتر بروف", "جيبه صلاه وتر بروف"], dept: "pocket_waterproof" },
+    { id: 503, canonical: "ملحفه جيب وتر بروف", keywords: ["ملحفه وتر بروف", "ملحفه جيب وتر بروف"], dept: "pocket_waterproof" },
+    { id: 504, canonical: "جيبة بطانة", keywords: ["بطانه وتر بروف", "جيبه بطانه"], dept: "pocket_waterproof" },
+    { id: 505, canonical: "سجادة جيب", keywords: ["سجاده وتر بروف", "سجاده جيب"], dept: "pocket_waterproof" }
   ],
 
-  // 50 Master Warehouse Route Sequence Defaults (from official layout document بلا عنوان.pdf)
-  DEFAULT_WAREHOUSE_ROUTE_SEQUENCE: [
-    // Page 1
-    "تلبيسه اطفالي",
-    "بنس اطفالي",
-    "اميرات اطفالي",
-    "اسدال بخمار اطفالي", // matches ساده ومشجر
-    "رقه اطفالي",
-    "خمار بيليسيه اطفالي",
-    "جوبير اطفالي",
-    "اسدال مشجر اطفالي",
-    "بجيوب اطفالي",
-    "طقم وتر بروف",
-    "جيبه وتر بروف",
-    "ملحفه وتر بروف",
-    "بطانه وتر بروف",
-    "سجاده وتر بروف",
-    "اسدال مشجر حريمي",
-    "ملحفه صلاه فسكوز ساده",
-    "ملحفه صلاه فسكوز مشجر",
-    "خمار بيليسيه",
-    "خمار بدون اكمام مشجر",
-    "خمار بدون اكمام ساده",
-    "خمار مشجر باكمام",
-    "خمار مشجر بدون اكمام",
-    // Page 2
-    "بجيوب حريمي",
-    "طقم صلاه فسكوز",
-    "بخمار حريمي", // matches ساده ومشجر
-    "رقه حريمي",
-    "كشكشه",
-    "بنس حريمي",
-    "اميرات حريمي",
-    "شريطه حريمي",
-    "مطرز",
-    "جوبير حريمي",
-    "تلبيسه حريمي",
-    "وقار",
-    "عبايه",
-    "زهره",
-    "جيبه فسكوز",
-    "طقم صلاه حريمي مشجر",
-    "طقم صلاه حريمي ساده",
-    "طقم صلاه اطفالي مقاس 4 مشجر",
-    "طقم صلاه اطفالي مقاس 4 ساده",
-    "طقم صلاه اطفالي مقاس 3 مشجر",
-    "طقم صلاه اطفالي مقاس 3 ساده",
-    "طقم صلاه اطفالي مقاس 2 مشجر",
-    "طقم صلاه اطفالي مقاس 2 ساده",
-    "طقم صلاه اطفالي مقاس 1 مشجر",
-    "طقم صلاه اطفالي مقاس 1 ساده",
-    "جيبه صلاه ليكرا",
-    // Page 3
-    "سجاد اطفالي",
-    "سجاد حريمي"
-  ],
+  // Defaults derived from WAREHOUSE_SHELF_CATALOG
+  get DEFAULT_WAREHOUSE_TITLES() {
+    return Array.from(new Set(this.WAREHOUSE_SHELF_CATALOG.map(item => item.canonical)));
+  },
+  get DEFAULT_WAREHOUSE_ROUTE_SEQUENCE() {
+    return this.WAREHOUSE_SHELF_CATALOG.map(item => item.canonical);
+  },
 
-  // Active Mutable Warehouse Titles (populated from localStorage or defaults)
-  WAREHOUSE_TITLES: [
-    "اسدال رقة اطفالي", "اسدال رقة حريمي", "اسدال مشجر اطفالي", "جيبة بطانة",
-    "خمار مشجر بأكمام", "ملحفة صلاة مشجرة", "ملحفه جيب وتر بروف", "توتي باج",
-    "اسدال بخمار أطفالي مشجر", "اسدال زهرة", "طقم صلاه فسكوز حريمي", "اسدال عباية",
-    "خمار بدون اكمام سادة", "سجادة صلاة اطفالي صغيرة", "خمار بيليسيه اطفالي",
-    "خمار بيليسيه حريمي", "اسدال بخمار حريمي مشجر", "خمار مشجر بدون اكمام",
-    "اسدال مشجر", "جيبه صلاه فيسكوز", "خمار زبدة", "سجادة الهدي قطيفة",
-    "اسدال فراشة", "اسدال بكشكشة", "ملحفه صلاه سادة", "اسدال فسكوز مشجر",
-    "سجادة صلاة قطيفة مطبوعة", "سجادة صلاة اطفالي قطيفة", "اسدال بجيوب حريمي",
-    "اسدال شريطه", "اسدال جوبير حريمي", "اسدال بنس حريمي", "اسدال بخمار حريمي سادة",
-    "اسدال وقار سادة", "خمار بأكمام سادة", "جيبه صلاه ليكرا", "سجادة جيب",
-    "طقم جيب وتر بروف", "جيبة صلاة وتر بروف", "طقم صلاه حريمي سادة",
-    "طقم الاميرات حريمي", "طقم صلاه حريمي مشجر", "اسدال تلبيسه حريمي",
-    "اسدال بخمار أطفالي", "اسدال مطرز", "اسدال بنس اطفالي", "طقم الاميرات اطفالي",
-    "طقم صلاه اطفالي ساده", "طقم صلاه اطفالي مشجر", "طقم صلاه اطفالي فراشات",
-    "اسدال جوبير اطفالي", "شنطة تهادوا تحابوا", "طقم صلاه حريمي قطعتين لون كشميري فراشات",
-    "اسدال بجيوب اطفالي", "اسدال تلبيسه اطفالي"
-  ],
+  // Active Mutable Warehouse Titles & Route Sequence
+  get WAREHOUSE_TITLES() {
+    if (this._warehouseTitles) return this._warehouseTitles;
+    return this.DEFAULT_WAREHOUSE_TITLES;
+  },
+  set WAREHOUSE_TITLES(val) {
+    this._warehouseTitles = val;
+  },
 
-  // Active Mutable Warehouse Route Sequence (populated from localStorage or defaults)
-  WAREHOUSE_ROUTE_SEQUENCE: [
-    // Page 1
-    "تلبيسه اطفالي",
-    "بنس اطفالي",
-    "اميرات اطفالي",
-    "اسدال بخمار اطفالي", // matches ساده ومشجر
-    "رقه اطفالي",
-    "خمار بيليسيه اطفالي",
-    "جوبير اطفالي",
-    "اسدال مشجر اطفالي",
-    "بجيوب اطفالي",
-    "طقم وتر بروف",
-    "جيبه وتر بروف",
-    "ملحفه وتر بروف",
-    "بطانه وتر بروف",
-    "سجاده وتر بروف",
-    "اسدال مشجر حريمي",
-    "ملحفه صلاه فسكوز ساده",
-    "ملحفه صلاه فسكوز مشجر",
-    "خمار بيليسيه",
-    "خمار بدون اكمام مشجر",
-    "خمار بدون اكمام ساده",
-    "خمار مشجر باكمام",
-    "خمار مشجر بدون اكمام",
-    // Page 2
-    "بجيوب حريمي",
-    "طقم صلاه فسكوز",
-    "بخمار حريمي", // matches ساده ومشجر
-    "رقه حريمي",
-    "كشكشه",
-    "بنس حريمي",
-    "اميرات حريمي",
-    "شريطه حريمي",
-    "مطرز",
-    "جوبير حريمي",
-    "تلبيسه حريمي",
-    "وقار",
-    "عبايه",
-    "زهره",
-    "جيبه فسكوز",
-    "طقم صلاه حريمي مشجر",
-    "طقم صلاه حريمي ساده",
-    "طقم صلاه اطفالي مقاس 4 مشجر",
-    "طقم صلاه اطفالي مقاس 4 ساده",
-    "طقم صلاه اطفالي مقاس 3 مشجر",
-    "طقم صلاه اطفالي مقاس 3 ساده",
-    "طقم صلاه اطفالي مقاس 2 مشجر",
-    "طقم صلاه اطفالي مقاس 2 ساده",
-    "طقم صلاه اطفالي مقاس 1 مشجر",
-    "طقم صلاه اطفالي مقاس 1 ساده",
-    "جيبه صلاه ليكرا",
-    // Page 3
-    "سجاد اطفالي",
-    "سجاد حريمي"
-  ],
+  get WAREHOUSE_ROUTE_SEQUENCE() {
+    if (this._warehouseRouteSeq) return this._warehouseRouteSeq;
+    return this.DEFAULT_WAREHOUSE_ROUTE_SEQUENCE;
+  },
+  set WAREHOUSE_ROUTE_SEQUENCE(val) {
+    this._warehouseRouteSeq = val;
+  },
 
   /**
    * Initializes catalog from localStorage if previously stored
@@ -337,61 +273,35 @@ const ArabicUtils = {
   },
 
   // Helper to find the physical picking index (Rank 0..N) for any given product
-  getWarehouseRouteRank(productDescription) {
+  getWarehouseRouteRank(productDescription, size = '') {
+    if (!productDescription) return 999999;
     if (typeof InventoryParser !== 'undefined' && typeof InventoryParser.getItemRank === 'function') {
-      const r = InventoryParser.getItemRank({ modelName: productDescription });
+      const r = InventoryParser.getItemRank({ modelName: productDescription, size });
       if (r !== 999999) return r;
     }
-    const norm = (productDescription || "")
-      .replace(/[أإآ]/g, "ا")
-      .replace(/ة/g, "ه")
-      .replace(/ى/g, "ي")
-      .replace(/\s+/g, "");
-
-    if (!norm) return 999999;
-
-    for (let i = 0; i < this.WAREHOUSE_ROUTE_SEQUENCE.length; i++) {
-      const target = this.WAREHOUSE_ROUTE_SEQUENCE[i]
-        .replace(/[أإآ]/g, "ا")
-        .replace(/ة/g, "ه")
-        .replace(/ى/g, "ي")
-        .replace(/\s+/g, "");
-
-      if (norm.includes(target) || target.includes(norm)) {
-        return i;
-      }
+    const match = this.matchCanonicalProduct(productDescription, size);
+    if (match && typeof match.shelfRank === 'number' && match.shelfRank !== 999999) {
+      return match.shelfRank;
     }
-
-    // Smart fallback for prayer rugs and carpets
-    const isCarpet = norm.includes("سجاد") || norm.includes("سجاده");
-    if (isCarpet) {
-      if (norm.includes("وتربروف")) return 13;
-      const isKids = norm.includes("اطفال") || norm.includes("اطفالي");
-      return isKids ? 543 : 542;
-    }
-
-    return 999999; // Fallback for unlisted items
+    return 999999;
   },
 
   // Helper to compute route rank for an entire order (minimum route index among its items)
   getOrderRouteRank(order) {
     if (!order) return 999999;
     if (typeof InventoryParser !== 'undefined' && typeof InventoryParser.getOrderExcelRank === 'function') {
-      return InventoryParser.getOrderExcelRank(order);
+      const r = InventoryParser.getOrderExcelRank(order);
+      if (r !== 999999) return r;
     }
     if (order.products && order.products.length > 0) {
       const ranks = order.products.map(p => {
         const desc = p.description || p.formattedLineText || p.rawLineText || p.modelName || '';
-        let r = this.getWarehouseRouteRank(desc);
-        if (r === 999999 && p.modelName) {
-          r = this.getWarehouseRouteRank(p.modelName);
-        }
-        return r;
+        return this.getWarehouseRouteRank(desc, p.size || '');
       });
       return Math.min(...ranks);
     }
     const fallbackDesc = order.description || order.modelName || order.rawDescription || '';
-    return this.getWarehouseRouteRank(fallbackDesc);
+    return this.getWarehouseRouteRank(fallbackDesc, order.size || '');
   },
 
   // Known standard colors
@@ -684,74 +594,280 @@ const ArabicUtils = {
   },
 
   /**
-   * Space-Immune & Skeleton Matcher for Warehouse Master Catalog
-   * 1. Space-stripped comparison against WAREHOUSE_TITLES (sorted longest-first)
-   * 2. Skeleton matching with wildcard handling for degraded Rubik font null-bytes
+   * Normalizes Arabic text strictly for fuzzy matching:
+   * Strips all diacritics, unifies أ/إ/آ/ٱ -> ا, ة -> ه, ى/ي -> ي, ك/ک -> ك,
+   * normalizes Unicode Presentation Forms (NFKC), and collapses whitespace.
    */
-  matchWarehouseModel(extractedModel) {
-    if (!extractedModel) return '';
+  normalizeForMatching(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+      .normalize('NFKC')
+      .replace(/[\u064B-\u065F\u0670\u0640\u0000\x00-\x1F]/g, '')
+      .replace(/[أإآٱ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/[ىي]/g, 'ي')
+      .replace(/[كک]/g, 'ك')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
 
-    const normSegment = this.normalizeArabic(extractedModel);
-    if (!normSegment) return '';
+  /**
+   * Computes Levenshtein edit distance between two strings
+   */
+  levenshteinDistance(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
 
-    // Sort WAREHOUSE_TITLES longest-first so compound titles match first
-    const sortedTitles = [...this.WAREHOUSE_TITLES].sort(
-      (a, b) => this.normalizeArabic(b).length - this.normalizeArabic(a).length
-    );
+    const v0 = new Array(b.length + 1);
+    const v1 = new Array(b.length + 1);
 
-    // 1. Longest title where normalizeArabic(title) is contained in normSegment (or vice versa)
-    for (const title of sortedTitles) {
-      const normTitle = this.normalizeArabic(title);
-      if (normTitle && (normSegment.includes(normTitle) || normTitle.includes(normSegment))) {
-        return title;
+    for (let i = 0; i <= b.length; i++) v0[i] = i;
+
+    for (let i = 0; i < a.length; i++) {
+      v1[0] = i + 1;
+      for (let j = 0; j < b.length; j++) {
+        const cost = a[i] === b[j] ? 0 : 1;
+        v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost);
+      }
+      for (let j = 0; j <= b.length; j++) v0[j] = v1[j];
+    }
+    return v0[b.length];
+  },
+
+  /**
+   * Computes token overlap score with fuzzy token matching
+   */
+  tokenOverlapScore(tokensCanonical, tokensLine) {
+    if (!tokensCanonical || !tokensLine) return 0;
+    let matches = 0;
+    for (const tC of tokensCanonical) {
+      if (tokensLine.includes(tC)) {
+        matches++;
+      } else {
+        for (const tL of tokensLine) {
+          if (tC.length >= 4 && tL.length >= 4 && Math.abs(tC.length - tL.length) <= 1) {
+            if (this.levenshteinDistance(tC, tL) <= 1) {
+              matches += 0.85;
+              break;
+            }
+          }
+        }
       }
     }
+    return matches;
+  },
 
-    // 2. Word-level skeleton matcher (handles missing glyphs / null-bytes \x00)
-    const cleanRaw = extractedModel.replace(/[\x00\u0000]/g, '?').trim();
-    const extWords = cleanRaw.split(/\s+/).filter(Boolean);
-    let bestCandidate = this.reconstructArabicWords(extractedModel);
-    let highestScore = -1;
+  /**
+   * Master Smart Fuzzy Product Name Matcher against WAREHOUSE_SHELF_CATALOG
+   * Combines warehouse shelf guide (بلا عنوان (1).pdf) & SKU sheet (inventory_export_1.csv)
+   * Resolves scrambled/mixed names, degraded Rubik glyphs, and reversed bidi streams.
+   */
+  matchCanonicalProduct(rawLine, preferredSize = '') {
+    if (!rawLine || typeof rawLine !== 'string') {
+      return {
+        id: 999,
+        canonical: '',
+        dept: 'other',
+        shelfRank: 999999,
+        score: 0
+      };
+    }
 
-    for (const candidate of this.WAREHOUSE_TITLES) {
-      const candWords = candidate.split(/\s+/).filter(Boolean);
-      if (Math.abs(candWords.length - extWords.length) > 1) continue;
+    const cleaned = this.cleanArabicStreamText(rawLine);
+    const normLine = this.normalizeForMatching(cleaned);
+    const normLineNoSpaces = normLine.replace(/\s+/g, '');
+    const tokensLine = normLine.split(/\s+/).filter(t => t.length > 1 && !/^\d+$/.test(t));
 
+    // Detect size from rawLine or preferredSize
+    let detectedSize = '';
+    const normSizeToCheck = this.normalizeForMatching(preferredSize || rawLine);
+    if (normSizeToCheck.includes('رابع') || normSizeToCheck.includes('4')) detectedSize = 'الرابع';
+    else if (normSizeToCheck.includes('ثالث') || normSizeToCheck.includes('3')) detectedSize = 'الثالث';
+    else if (normSizeToCheck.includes('ثاني') || normSizeToCheck.includes('2')) detectedSize = 'الثاني';
+    else if (normSizeToCheck.includes('اول') || normSizeToCheck.includes('1')) detectedSize = 'الاول';
+
+    let bestEntry = null;
+    let bestScore = -999;
+    let bestIndex = 999999;
+
+    for (let idx = 0; idx < this.WAREHOUSE_SHELF_CATALOG.length; idx++) {
+      const entry = this.WAREHOUSE_SHELF_CATALOG[idx];
       let score = 0;
-      const minWords = Math.min(candWords.length, extWords.length);
 
-      for (let w = 0; w < minWords; w++) {
-        const eW = this.normalizeArabic(extWords[w]);
-        const cW = this.normalizeArabic(candWords[w]);
+      const normCanonical = this.normalizeForMatching(entry.canonical);
+      const normCanonicalNoSpaces = normCanonical.replace(/\s+/g, '');
+      const tokensCanonical = normCanonical.split(/\s+/).filter(Boolean);
 
-        if (eW === cW) {
-          score += 10;
-        } else {
-          let matches = 0;
-          let wildcards = 0;
-          let diffs = 0;
-          const minL = Math.min(eW.length, cW.length);
-
-          if (Math.abs(eW.length - cW.length) <= 1) {
-            for (let k = 0; k < minL; k++) {
-              if (eW[k] === '?') wildcards++;
-              else if (eW[k] === cW[k]) matches++;
-              else diffs++;
-            }
-            if (diffs === 0 && (matches > 0 || wildcards > 0)) {
-              score += (matches * 2) + wildcards;
+      // 1. Keyword Matching (exact & space-stripped)
+      let keywordMatched = false;
+      let maxKeywordLen = 0;
+      if (entry.keywords && entry.keywords.length > 0) {
+        for (const kw of entry.keywords) {
+          const normKw = this.normalizeForMatching(kw);
+          const normKwNoSpaces = normKw.replace(/\s+/g, '');
+          if (normLine.includes(normKw) || normLineNoSpaces.includes(normKwNoSpaces)) {
+            keywordMatched = true;
+            if (normKw.length > maxKeywordLen) {
+              maxKeywordLen = normKw.length;
             }
           }
         }
       }
 
-      if (score > highestScore && score >= 6) {
-        highestScore = score;
-        bestCandidate = candidate;
+      if (keywordMatched) {
+        score += 85 + (maxKeywordLen * 3);
+      }
+
+      // 2. Exact Canonical Substring Match
+      if (normLine.includes(normCanonical) || normLineNoSpaces.includes(normCanonicalNoSpaces)) {
+        score += 100 + (normCanonical.length * 3);
+      }
+
+      // 3. Token Overlap
+      const overlap = this.tokenOverlapScore(tokensCanonical, tokensLine);
+      const overlapRatio = tokensCanonical.length > 0 ? (overlap / tokensCanonical.length) : 0;
+      score += (overlapRatio * 60);
+
+      // 4. Character-Skeleton / Levenshtein Distance
+      const dist = this.levenshteinDistance(normCanonicalNoSpaces, normLineNoSpaces);
+      const maxLen = Math.max(normCanonicalNoSpaces.length, normLineNoSpaces.length);
+      const sim = maxLen > 0 ? (1 - dist / maxLen) : 0;
+      if (sim > 0.5) {
+        score += (sim * 45);
+      }
+
+      // 5. Size Filter (for kids prayer sets 301..308: 4 then 3 then 2 then 1)
+      if (entry.sizeFilter) {
+        if (detectedSize && entry.sizeFilter === detectedSize) {
+          score += 70; // Exact size match bonus
+        } else if (detectedSize && entry.sizeFilter !== detectedSize) {
+          score -= 120; // Strong penalty for wrong size
+        }
+      }
+
+      // 6. Department Sanity Penalties & Bonuses
+      const hasKidsWord = normLine.includes('اطفال') || normLine.includes('يلافط');
+      const hasWomenWord = normLine.includes('حريمي');
+      if (hasKidsWord && entry.dept === 'women') {
+        score -= 100;
+      }
+      if (hasWomenWord && entry.dept === 'kids') {
+        score -= 100;
+      }
+
+      // Pocket & Waterproof Group vs Regular Rugs vs Garments
+      const isPocketOrWaterproofLine = normLine.includes('وتر') || normLine.includes('بروف') || normLine.includes('بطانه') ||
+                                       normLine.includes('سجاده جيب') || normLine.includes('سجادة جيب') ||
+                                       normLine.includes('طقم جيب') || normLine.includes('ملحفه جيب') || normLine.includes('ملحفة جيب') ||
+                                       normLine.includes('جيبه جيب') || normLine.includes('جيبة جيب');
+
+      const isRegularRugLine = (normLine.includes('سجاد') || normLine.includes('سجاده')) && !isPocketOrWaterproofLine;
+
+      if (isPocketOrWaterproofLine) {
+        if (entry.dept === 'pocket_waterproof') {
+          score += 60;
+        } else {
+          score -= 130;
+        }
+      } else {
+        if (entry.dept === 'pocket_waterproof') {
+          score -= 90;
+        }
+      }
+
+      if (isRegularRugLine) {
+        if (entry.dept === 'rug_regular') {
+          score += 60;
+        } else {
+          score -= 130;
+        }
+      } else {
+        if (entry.dept === 'rug_regular') {
+          score -= 90;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestEntry = entry;
+        bestIndex = idx;
       }
     }
 
-    return bestCandidate;
+    if (bestEntry && bestScore >= 35) {
+      return {
+        id: bestEntry.id,
+        canonical: bestEntry.canonical,
+        dept: bestEntry.dept,
+        sizeFilter: bestEntry.sizeFilter || null,
+        shelfRank: bestIndex,
+        score: bestScore
+      };
+    }
+
+    // Fallback: clean reconstruction
+    return {
+      id: 999,
+      canonical: this.reconstructArabicWords(rawLine),
+      dept: 'other',
+      shelfRank: 999999,
+      score: bestScore
+    };
+  },
+
+  /**
+   * Identifies the primary department for an entire order ('kids', 'women', 'rug_regular', 'pocket_waterproof', or 'other')
+   */
+  getOrderDepartment(order) {
+    if (!order) return 'other';
+
+    // If order has products array
+    if (Array.isArray(order.products) && order.products.length > 0) {
+      const depts = order.products.map(p => {
+        if (p.dept && p.dept !== 'other') return p.dept;
+        const text = p.description || p.formattedLineText || p.rawLineText || p.modelName || '';
+        const match = this.matchCanonicalProduct(text, p.size || '');
+        return match.dept;
+      });
+
+      // Priority: Pocket/Waterproof items are strictly isolated at the very end
+      if (depts.includes('pocket_waterproof')) return 'pocket_waterproof';
+      if (depts.includes('rug_regular')) return 'rug_regular';
+      if (depts.includes('kids')) return 'kids';
+      if (depts.includes('women')) return 'women';
+    }
+
+    // Fallback on order title / description / model
+    const text = `${order.modelName || ''} ${order.title || ''} ${order.rawDescription || ''} ${order.fullNormalizedDesc || ''}`;
+    const match = this.matchCanonicalProduct(text, order.size || '');
+    return match.dept || 'other';
+  },
+
+  isPocketWaterproofItem(orderOrProduct) {
+    return this.getOrderDepartment(orderOrProduct) === 'pocket_waterproof';
+  },
+
+  isRegularRugItem(orderOrProduct) {
+    return this.getOrderDepartment(orderOrProduct) === 'rug_regular';
+  },
+
+  isCarpetItem(orderOrProduct) {
+    const dept = this.getOrderDepartment(orderOrProduct);
+    return dept === 'rug_regular' || dept === 'pocket_waterproof';
+  },
+
+  /**
+   * Space-Immune & Skeleton Matcher for Warehouse Master Catalog
+   * Delegates to matchCanonicalProduct for official canonical shelf name
+   */
+  matchWarehouseModel(extractedModel) {
+    if (!extractedModel) return '';
+    const match = this.matchCanonicalProduct(extractedModel);
+    if (match && match.canonical) {
+      return match.canonical;
+    }
+    return this.reconstructArabicWords(extractedModel);
   },
 
   normalize(s) {
@@ -897,10 +1013,11 @@ const ArabicUtils = {
       }
     }
 
-    // Reconstruct clean official model from catalog with proper spaces
-    const modelName = this.matchWarehouseModel(rawModel);
-    const { color, code: colorCode } = this.parseColorAndCode(rawColor);
+    // Reconstruct clean official model from catalog with proper spaces & smart fuzzy canonical matcher
     const size = this.parseSize(rawSize);
+    const { color, code: colorCode } = this.parseColorAndCode(rawColor);
+    const canonicalMatch = this.matchCanonicalProduct(rawModel, size);
+    const modelName = (canonicalMatch && canonicalMatch.canonical) ? canonicalMatch.canonical : this.matchWarehouseModel(rawModel);
 
     // Format the final displayed line cleanly as:
     // [اسم الموديل المعتمد] - [اللون] / [المقاس] (QTY X)
@@ -919,6 +1036,10 @@ const ArabicUtils = {
 
     return {
       modelName,
+      canonicalId: canonicalMatch ? canonicalMatch.id : 999,
+      canonicalTitle: canonicalMatch ? canonicalMatch.canonical : modelName,
+      dept: canonicalMatch ? canonicalMatch.dept : 'other',
+      shelfRank: canonicalMatch ? canonicalMatch.shelfRank : 999999,
       color,
       colorCode,
       size,
@@ -976,10 +1097,11 @@ const ArabicUtils = {
    * - Order Reference & Tracking Number
    * - Notes & embedded SKUs
    */
-  parseBostaPage(lines, pageNumber) {
+  parseBostaPage(lines, pageNumber, rawItems = []) {
     const products = [];
     let trackingNumber = '';
     let orderReference = '';
+    let customerName = '';
     let city = '';
     const notesLines = [];
     let lastProductIndex = -1;
@@ -998,6 +1120,23 @@ const ArabicUtils = {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
+
+      // Customer Name extraction from Bosta header "توصيل إلى:" or "Customer:"
+      if (!customerName) {
+        if (/توصيل\s*إ?لى|Deliver\s*to|Customer[:\s]/i.test(line)) {
+          let after = line.replace(/^.*?(?:توصيل\s*إ?لى|Deliver\s*to|Customer)[:\s]*/i, '').trim();
+          after = after.replace(/التاجر[:\s]*خيام.*|خيام\s*لملابس.*|khaim.*/i, '').trim();
+          if (after && after.length >= 2 && !/^\+?\d+$/.test(after) && !/AWB|Order|QTY|قطعة|عطق|COD/i.test(after)) {
+            customerName = after;
+          } else if (i + 1 < lines.length) {
+            let nextL = lines[i + 1].trim();
+            nextL = nextL.replace(/التاجر[:\s]*خيام.*|خيام\s*لملابس.*|khaim.*/i, '').trim();
+            if (nextL && nextL.length >= 2 && !/^\+?\d+$/.test(nextL) && !/AWB|Order|QTY|قطعة|عطق|COD|توصيل|محافظة|القاهرة|الجيزة|الإسكندرية/i.test(nextL)) {
+              customerName = nextL;
+            }
+          }
+        }
+      }
 
       // 1. Total Pieces extraction from pill line (e.g., [4 قطع], 1 قطعة, قطع 4, فتح الشحنة : نعم)
       if (!pillPiecesInt) {
@@ -1042,6 +1181,23 @@ const ArabicUtils = {
         parsedProduct.description = parsedProduct.description || parsedProduct.formattedLineText || parsedProduct.rawLineText || parsedProduct.modelName;
         products.push(parsedProduct);
         lastProductIndex = i;
+      }
+    }
+
+    // Secondary geometry fallback for customerName if rawItems are present (X >= 100 on right side)
+    if (!customerName && Array.isArray(rawItems) && rawItems.length > 0) {
+      const deliverToItem = rawItems.find(it => (it.x >= 100 || it.x >= 120) && /توصيل\s*إ?لى/i.test(it.str || ''));
+      if (deliverToItem) {
+        const candidate = rawItems
+          .filter(it => it.x >= 90 && it.y < deliverToItem.y && it.y >= deliverToItem.y - 25 && it.str && it.str.trim())
+          .sort((a, b) => b.x - a.x)
+          .map(it => it.str.trim())
+          .join(' ')
+          .replace(/التاجر[:\s]*خيام.*|خيام\s*لملابس.*|khaim.*/i, '')
+          .trim();
+        if (candidate && candidate.length >= 2 && !/^\d+$/.test(candidate)) {
+          customerName = candidate;
+        }
       }
     }
 
@@ -1161,6 +1317,8 @@ const ArabicUtils = {
       size: primaryProduct.size,
       sku,
       category,
+      customerName: customerName || `عميل #${pageNumber}`,
+      dept: this.getOrderDepartment({ products, modelName: primaryProduct.modelName, rawDescription: products.map(p => p.raw).join('\n') }),
       rawNotes: fullNotesText,
       rawDescription: products.map(p => p.raw).join('\n'),
       normalizedModel: primaryProduct.normalizedModel,

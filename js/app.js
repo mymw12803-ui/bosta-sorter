@@ -177,6 +177,8 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadTopBtn: document.getElementById('download-top-btn'),
     downloadStickyBar: document.getElementById('download-sticky-bar'),
     downloadStickyBtn: document.getElementById('download-sticky-btn'),
+    downloadA4PicklistBtn: document.getElementById('download-a4-picklist-btn'),
+    downloadA4StickyBtn: document.getElementById('download-a4-sticky-btn'),
 
     // Theme toggle
     themeToggleBtn: document.getElementById('theme-toggle-btn'),
@@ -1451,11 +1453,11 @@ document.addEventListener('DOMContentLoaded', () => {
     hideResults();
 
     try {
-      // 0. Merge Multi-PDFs if multiple files and merge toggle is enabled
-      if (state.uploadedPdfFiles.length > 1 && state.mergeEnabled) {
+      // 0. Automatically merge Multi-PDFs if multiple files are selected or dropped
+      if (state.uploadedPdfFiles.length > 1) {
         elements.progressBar.style.width = '10%';
         elements.progressPercent.textContent = '10%';
-        elements.progressStatus.textContent = `جاري دمج ${state.uploadedPdfFiles.length} ملفات PDF معاً...`;
+        elements.progressStatus.textContent = `جاري دمج ${state.uploadedPdfFiles.length} ملفات PDF معاً في ملف موحد...`;
 
         const buffers = state.uploadedPdfFiles.map(f => f.buffer);
         const mergedBytes = await PDFProcessor.mergePdfBuffers(buffers, (prog) => {
@@ -1476,7 +1478,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 1. Text Extraction using safely cloned buffer with non-blocking async loops
       const safeBuffer = state.pdfArrayBuffer.slice(0);
-      const isMerged = state.uploadedPdfFiles.length > 1 && state.mergeEnabled;
+      const isMerged = state.uploadedPdfFiles.length > 1;
       const basePct = isMerged ? 30 : 0;
       const scale = isMerged ? 0.7 : 1.0;
 
@@ -1688,6 +1690,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (elements.downloadFilteredBtn) {
       elements.downloadFilteredBtn.disabled = filtered.length === 0;
+    }
+    if (elements.downloadA4PicklistBtn) {
+      elements.downloadA4PicklistBtn.disabled = state.sortedPages.length === 0;
+    }
+    if (elements.downloadA4StickyBtn) {
+      elements.downloadA4StickyBtn.disabled = state.sortedPages.length === 0;
     }
 
     elements.resultsTableBody.innerHTML = '';
@@ -2193,6 +2201,59 @@ document.addEventListener('DOMContentLoaded', () => {
       const filename = getCustomExportFilename('Bosta_All_Sorted.pdf');
       await downloadPdfBatch(state.sortedPages, filename);
     });
+  }
+
+  // Standalone Multi-Page A4 Pick-List & Customer Order Directory PDF (Strictly NO SKU)
+  async function handleDownloadA4Picklist() {
+    if (!state.sortedPages || state.sortedPages.length === 0) {
+      showToast('يرجى معالجة ملف البوالص أولاً قبل تحميل كشف التجهيز والعملاء.', 'error');
+      return;
+    }
+
+    if (elements.downloadA4PicklistBtn) elements.downloadA4PicklistBtn.disabled = true;
+    if (elements.downloadA4StickyBtn) elements.downloadA4StickyBtn.disabled = true;
+    if (elements.progressSection) elements.progressSection.classList.remove('hidden');
+
+    try {
+      showToast('جاري إعداد كشف التجهيز والعملاء المعتمد (A4)...', 'info');
+      const pdfBytes = await PDFProcessor.generateA4PickListPDF(state.sortedPages);
+      const filename = `كشف_تجهيز_المخزن_والعملاء_A4_${state.sortedPages.length}_أوردر.pdf`;
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      if (typeof confetti === 'function') {
+        confetti({ particleCount: 60, spread: 50, origin: { y: 0.8 } });
+      }
+      showToast('تم تنزيل كشف التجهيز والعملاء (A4) بنجاح!', 'success');
+    } catch (err) {
+      console.error('Error generating A4 Pick-List PDF:', err);
+      try {
+        PDFProcessor.openA4PrintWindow(state.sortedPages);
+        showToast('تم فتح نافذة الطباعة A4 المباشرة.', 'info');
+      } catch (printErr) {
+        showErrorModal(`حدث خطأ أثناء إنشاء كشف الـ A4:\n\n${err.message || err}`);
+      }
+    } finally {
+      if (elements.downloadA4PicklistBtn) elements.downloadA4PicklistBtn.disabled = false;
+      if (elements.downloadA4StickyBtn) elements.downloadA4StickyBtn.disabled = false;
+      if (elements.progressSection) {
+        setTimeout(() => elements.progressSection.classList.add('hidden'), 500);
+      }
+    }
+  }
+
+  if (elements.downloadA4PicklistBtn) {
+    elements.downloadA4PicklistBtn.addEventListener('click', handleDownloadA4Picklist);
+  }
+  if (elements.downloadA4StickyBtn) {
+    elements.downloadA4StickyBtn.addEventListener('click', handleDownloadA4Picklist);
   }
 
   // Dynamic Filter Download Button: "تحميل نتائج الفلتر الحالي (X بوليصة)" -> Downloads only currently filtered rows

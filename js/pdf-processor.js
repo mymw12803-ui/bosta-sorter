@@ -167,7 +167,7 @@ const PDFProcessor = {
       }
 
       // Parse Bosta Arabic format strictly
-      const parsed = ArabicUtils.parseBostaPage(lines, pageNum);
+      const parsed = ArabicUtils.parseBostaPage(lines, pageNum, items);
 
       // If inventory sheet was loaded, enrich with SKU matching and walkIndex
       if (typeof InventoryParser !== 'undefined') {
@@ -282,6 +282,156 @@ const PDFProcessor = {
    *
    * Level 3 (Optional): If an Inventory CSV/SKU sheet is uploaded:
    *   Use uploaded CSV's row sequence as tie-breaker within identical route ranks.
+  /**
+   * Helper to inspect items in an order for regular prayer rugs and waterproof/pocket items
+   */
+  getOrderRugAndWaterproofAnalysis(order) {
+    const products = (order.products && Array.isArray(order.products) && order.products.length > 0)
+      ? order.products
+      : [];
+
+    let hasRegularRug = false;
+    let regularRugCount = 0;
+    let hasPocketWaterproof = false;
+    let pocketWaterproofCount = 0;
+    let otherCount = 0;
+
+    for (const p of products) {
+      const text = `${p.modelName || ''} ${p.title || ''} ${p.rawLineText || ''} ${p.description || ''}`;
+      const qty = p.qty || 1;
+      const dept = p.dept || ((typeof ArabicUtils !== 'undefined') ? ArabicUtils.matchCanonicalProduct(text, p.size || '').dept : 'other');
+
+      if (dept === 'pocket_waterproof' || (typeof ArabicUtils !== 'undefined' && ArabicUtils.isPocketWaterproofItem(p))) {
+        hasPocketWaterproof = true;
+        pocketWaterproofCount += qty;
+      } else if (dept === 'rug_regular' || (typeof ArabicUtils !== 'undefined' && ArabicUtils.isRegularRugItem(p))) {
+        hasRegularRug = true;
+        regularRugCount += qty;
+      } else {
+        otherCount += qty;
+      }
+    }
+
+    // Fallback if products was empty
+    if (products.length === 0) {
+      const count = order.piecesCount || 1;
+      const text = `${order.modelName || ''} ${order.title || ''} ${order.rawDescription || ''} ${order.fullNormalizedDesc || ''}`;
+      if (typeof ArabicUtils !== 'undefined' && ArabicUtils.isPocketWaterproofItem(order)) {
+        hasPocketWaterproof = true;
+        pocketWaterproofCount = count;
+      } else if (typeof ArabicUtils !== 'undefined' && ArabicUtils.isRegularRugItem(order)) {
+        hasRegularRug = true;
+        regularRugCount = count;
+      } else {
+        otherCount = count;
+      }
+    }
+
+    const totalPieces = typeof order.piecesCount === 'number'
+      ? order.piecesCount
+      : (parseInt(order.totalPieces, 10) || (regularRugCount + pocketWaterproofCount + otherCount) || 1);
+
+    const hasOtherProductWithRug = hasRegularRug && (
+      otherCount > 0 ||
+      hasPocketWaterproof ||
+      (products.length > 1 && products.some(p => !ArabicUtils.isRegularRugItem(p))) ||
+      totalPieces > regularRugCount
+    );
+
+    return {
+      hasRegularRug,
+      regularRugCount,
+      hasPocketWaterproof,
+      pocketWaterproofCount,
+      otherCount,
+      totalPieces,
+      hasOtherProductWithRug
+    };
+  },
+
+  /**
+   * Exact New Sorting & Grouping Hierarchy:
+   * Classifies order into one of the exact Main Buckets (1 to 8):
+   * Bucket 1 — Large Orders (4+ Pieces, sorted descending: 8 -> 7 -> 6 -> 5 -> 4 قطع)
+   * Bucket 2 — Three-Piece Orders (3 قطع without non-pocket rugs)
+   * Bucket 3 — Orders Containing a Regular Prayer Rug WITH Another Product (مع منتج آخر)
+   * Bucket 4 — Two-Piece Orders (2 قطع) + Single Regular Prayer Rug at the End of Twos (أواخر الاثنينات):
+   *   - Subgroup 4A: Normal 2-piece orders (2 قطع)
+   *   - Subgroup 4B: Single Regular Prayer Rug (سجادة واحدة فقط ليست جيب)
+   * Bucket 5 — Single-Piece Women Orders (1 قطعة - الحريمي)
+   * Bucket 6 — Single-Piece Kids Orders (1 قطعة - الأطفالي)
+   * Bucket 7 — Single-Piece Other Items (Bags/Accessories)
+   * Bucket 8 (FINAL GROUP) — Pocket & Waterproof Orders (مجموعة الجيب ووتر بروف في نهاية البوالص)
+   * Bucket 9 — Unrecognized Orders
+   */
+  classifyOrderBucket(order) {
+    if (order.hasRecognizedDescription === false) {
+      return { bucket: 9, subBucket: '', name: 'غير معرّف' };
+    }
+
+    const analysis = this.getOrderRugAndWaterproofAnalysis(order);
+    const count = analysis.totalPieces;
+
+    // Bucket 8 (FINAL GROUP AT THE END OF THE PDF) — Pocket & Waterproof Orders:
+    // All single-piece orders (or pure waterproof/pocket orders) whose product description contains جيب OR وتر بروف
+    if (analysis.hasPocketWaterproof && (count === 1 || (analysis.otherCount === 0 && !analysis.hasRegularRug))) {
+      return { bucket: 8, subBucket: '', name: 'مجموعة الجيب ووتر بروف' };
+    }
+
+    // Bucket 3 — Orders Containing a Regular Prayer Rug WITH Another Product (مع منتج آخر):
+    // Any order where at least one item is a regular prayer rug AND the order has another product with it.
+    // Placed strictly between the 3-piece orders (الثلاثات) and the 2-piece orders (الاثنينات)!
+    if (analysis.hasRegularRug && analysis.hasOtherProductWithRug) {
+      return { bucket: 3, subBucket: '', name: 'سجادة صلاة مع منتج آخر' };
+    }
+
+    // Bucket 1 — Large Orders (4+ Pieces, excluding Rug+Other):
+    if (count >= 4) {
+      return { bucket: 1, subBucket: '', name: 'أوردرات كبيرة (4 قطع فأكثر)' };
+    }
+
+    // Bucket 2 — Three-Piece Orders (3 قطع without non-pocket rugs):
+    if (count === 3) {
+      return { bucket: 2, subBucket: '', name: 'أوردرات 3 قطع' };
+    }
+
+    // Bucket 4 — Two-Piece Orders (2 قطع) + Single Regular Prayer Rug at the End of Twos (أواخر الاثنينات):
+    // Subgroup 4A: Normal 2-piece orders (2 قطع)
+    if (count === 2) {
+      return { bucket: 4, subBucket: '4A', name: 'أوردرات قطعتين (2 قطعة)' };
+    }
+    // Subgroup 4B (At the very end of 2-piece orders / في أواخر الاثنينات): Any order consisting ONLY of a Single Regular Prayer Rug!
+    if (count === 1 && analysis.hasRegularRug && analysis.otherCount === 0 && !analysis.hasPocketWaterproof) {
+      return { bucket: 4, subBucket: '4B', name: 'سجادة صلاة فردية عادية' };
+    }
+
+    // Single-Piece Orders (1 piece):
+    if (count === 1) {
+      const dept = order.dept || ((typeof ArabicUtils !== 'undefined') ? ArabicUtils.getOrderDepartment(order) : 'other');
+
+      // Bucket 5 — Single-Piece Women Orders (1 قطعة - الحريمي excluding جيب/وتر بروف)
+      if (dept === 'women') {
+        return { bucket: 5, subBucket: '', name: 'أوردرات حريمي قطعة واحدة' };
+      }
+
+      // Bucket 6 — Single-Piece Kids Orders (1 قطعة - الأطفالي excluding جيب/وتر بروف)
+      if (dept === 'kids') {
+        return { bucket: 6, subBucket: '', name: 'أوردرات أطفالي قطعة واحدة' };
+      }
+
+      // Bucket 7 — Single-Piece Other Items (Bags/Accessories excluding جيب/وتر بروف)
+      return { bucket: 7, subBucket: '', name: 'أوردرات أصناف أخرى قطعة واحدة' };
+    }
+
+    // Fallback if pieces count > 1 but couldn't be categorized
+    if (count >= 4) return { bucket: 1, subBucket: '', name: 'أوردرات كبيرة (4+ قطع)' };
+    if (count === 3) return { bucket: 2, subBucket: '', name: 'أوردرات 3 قطع' };
+    if (count === 2) return { bucket: 4, subBucket: '4A', name: 'أوردرات قطعتين' };
+    return { bucket: 7, subBucket: '', name: 'أخرى' };
+  },
+
+  /**
+   * Universal Multi-Tiered Sorting Pipeline using the Exact 8-Bucket Hierarchy
    */
   sortPages(pages, options = {}) {
     const list = [...pages];
@@ -293,17 +443,24 @@ const PDFProcessor = {
     }
     const useWalkSequence = opts.useWalkSequence !== false;
 
-    // Pre-calculate pieces count and Master Excel Rank for stability
+    // Pre-calculate pieces count, department, and Master Excel Rank for stability
     for (const item of list) {
       const count = typeof item.totalPieces === 'number'
         ? item.totalPieces
         : (item.piecesCount || item.totalItemsCount || parseInt(item.totalPieces, 10) || 1);
       item.piecesCount = count;
       item.totalPieces = count;
+      item.dept = item.dept || (typeof ArabicUtils !== 'undefined' ? ArabicUtils.getOrderDepartment(item) : 'other');
       item.excelRank = (typeof InventoryParser !== 'undefined')
         ? InventoryParser.getOrderExcelRank(item)
         : this.getOrderRouteRank(item);
       item.routeRank = item.excelRank;
+
+      // Classify into exact 8-Bucket Hierarchy
+      const bInfo = this.classifyOrderBucket(item);
+      item.bucket = bInfo.bucket;
+      item.subBucket = bInfo.subBucket;
+      item.bucketName = bInfo.name;
     }
 
     list.sort((a, b) => {
@@ -314,14 +471,19 @@ const PDFProcessor = {
         return a.originalPageNumber - b.originalPageNumber;
       }
 
-      // Tier 1 (Mandatory & Primary): Total Pieces Count Descending
-      // Group 1: Large Orders (3+ pieces descending: 8, 7, 6, 5, 4, 3...)
-      // Group 2: Two-Piece Orders (2 pieces)
-      // Group 3: Single-Piece Orders (1 piece) at the very end of the print file
-      const countA = a.piecesCount || 1;
-      const countB = b.piecesCount || 1;
-      if (countB !== countA) {
-        return countB - countA;
+      // Tier 1 (Mandatory & Primary): Main Bucket (1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9)
+      if (a.bucket !== b.bucket) {
+        return a.bucket - b.bucket;
+      }
+
+      // Inside Bucket 4: Subgroup 4A (2-Piece Orders) come before Subgroup 4B (Single Regular Rugs at the end of twos)
+      if (a.bucket === 4 && a.subBucket !== b.subBucket) {
+        return (a.subBucket === '4A') ? -1 : 1;
+      }
+
+      // Inside Bucket 1: Total Pieces descending (8 -> 7 -> 6 -> 5 -> 4)
+      if (a.bucket === 1 && ((b.piecesCount || 1) !== (a.piecesCount || 1))) {
+        return (b.piecesCount || 1) - (a.piecesCount || 1);
       }
 
       // Tier 2 (Secondary): Master Excel SKU Sequence Rank (0 to N from sheet بعد الترتيب)
@@ -366,29 +528,49 @@ const PDFProcessor = {
   },
 
   /**
-   * Stamps clean sequential reference [ #X ] strictly inside the blank white bottom margin (Safe Zone).
-   * Positioned below the label border and below "Created: ..." line at y: 8-12 pt from bottom edge.
-   * Bold font size 13 pt in solid black, with NO background box covering any label elements.
-   * NEVER called on blank separator pages, master manifest, or batch pick-list sheets.
+   * Stamps clean sequential reference #X inside the bottom-left corner of "وصف الشحنة"
+   * (Shipment Description) box, directly above the horizontal divider line of the "Tracking Number" box.
+   * Exact Coordinates on a 212.60 x 354.33 pt page:
+   *   - Horizontal (X): 14 pt from left edge (~7% from left edge, aligned above Tracking Number)
+   *   - Vertical (Y): 82 pt from bottom edge (within 80..92 pt bottom-up, ~262..274 pt top-down)
+   * Clean white background pill (44 x 18 pt) with thin black border and bold black text #X (12 pt).
+   * NEVER covers return address, barcode, or Arabic description text.
+   * NEVER called on blank separator pages.
    */
   stampLabelSequenceNumber(page, seqNumber, font) {
     if (!page || !seqNumber || !font) return;
-    const { width } = page.getSize();
-    const numText = `[ #${seqNumber} ]`;
-    const fontSize = 13; // Clear bold font (12-14 pt)
-    const textWidth = font.widthOfTextAtSize(numText, fontSize);
-
-    // Position strictly inside the blank white margin at the bottom of the page
-    // Coordinates: x = center, y = 9.5 pt from bottom edge (within 8 to 12 pt safe zone)
-    const x = (width - textWidth) / 2;
-    const y = 9.5;
-
     const { rgb } = (typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null));
 
-    // Draw text cleanly in solid black with NO background box
-    page.drawText(numText, {
+    const numText = `#${seqNumber}`;
+    const fontSize = 12; // Bold 12pt
+    const textW = font.widthOfTextAtSize(numText, fontSize);
+
+    // Box dimensions: width 44pt (gracefully expands for 4+ digits), height 18pt
+    const pillW = Math.max(44, textW + 10);
+    const pillH = 18;
+
+    // Exact placement in Red Box Zone: bottom-left of "وصف الشحنة", above Tracking Number divider
+    const x = 14;
+    const y = 82;
+
+    // Draw clean white background pill with thin black border
+    page.drawRectangle({
       x,
       y,
+      width: pillW,
+      height: pillH,
+      color: rgb(1, 1, 1),
+      borderColor: rgb(0, 0, 0),
+      borderWidth: 1.0
+    });
+
+    // Draw bold black text #X centered inside the pill
+    const textX = x + (pillW - textW) / 2;
+    const textY = y + (pillH - fontSize) / 2 + 2;
+
+    page.drawText(numText, {
+      x: textX,
+      y: textY,
       size: fontSize,
       font,
       color: rgb(0, 0, 0)
@@ -865,57 +1047,42 @@ const PDFProcessor = {
   },
 
   /**
-   * Adjusts page size to thermal 75x125 mm (212.60 x 354.33 pt)
-   * If already ~75x125mm (e.g. 195..235 x 335..375 pt), keeps native coordinates to preserve barcode sharpness.
-   */
-  /**
-   * Adjusts page size to thermal 75x125 mm (212.60 x 354.33 pt) with dedicated bottom margin.
-   * Gives two clean choices:
-   * - Option A (Default - 'safe_fit'): Scales proportionally so all 4 borders fit cleanly,
-   *   leaving dedicated blank margin space (y: 0..26 pt) at the bottom for the [ #X ] sequence number.
-   * - Option B ('fill_width'): Stretches label width to fill full 75mm thermal width, anchored
-   *   towards the top, preserving the bottom margin exclusively for the sequence number.
+   * Adjusts page size to thermal 75x125 mm (212.60 x 354.33 pt) full-bleed.
+   * - Already-sized pages (e.g. 190..235 x 330..380 pt like pdf24_مدمج.pdf [212.63 x 354.25]):
+   *   Do NOT shrink the page or add extra outer margins! Keep 1:1 full size.
+   * - Resizing standard A4/A6 or other non-thermal Bosta PDFs to 75x125 mm:
+   *   Scale tightly to fill 98% to 100% of the page width and height, leaving only 1-2mm (~3pt) safety margin.
    */
   applyThermalResize(page, options = {}) {
     if (!page) return;
-    const fitMode = (typeof options === 'string' ? options : options.fitMode) || 'safe_fit';
     const targetW = options.targetWidth || 212.60;
     const targetH = options.targetHeight || 354.33;
-    const bottomMargin = 26; // Dedicated blank bottom margin exclusively for [ #X ]
 
     const { width: origW, height: origH } = page.getSize();
 
-    if (fitMode === 'fill_width') {
-      // Option B (Fill Width - 100%): Stretches label width to fill full 75mm, anchored towards top
-      const availH = targetH - bottomMargin;
-      const scaleX = targetW / origW;
-      const scaleY = Math.min(scaleX, availH / origH);
-      const scale = Math.min(scaleX, scaleY);
-      const scaledW = origW * scale;
-      const scaledH = origH * scale;
-
-      page.scale(scale, scale);
+    // 1. If already ~75x125mm (e.g. 190..235 x 330..380 pt, like pdf24_مدمج.pdf [212.63 x 354.25]):
+    // Do NOT shrink the page or add extra outer margins! Keep 1:1 full size.
+    if (origW >= 190 && origW <= 235 && origH >= 330 && origH <= 380) {
       page.setSize(targetW, targetH);
-      const offsetX = (targetW - scaledW) / 2;
-      const offsetY = targetH - scaledH - 3; // Anchored towards top
-      page.translateContent(offsetX, Math.max(bottomMargin, offsetY));
-    } else {
-      // Option A (Default - Safe Fit with Margins): Scales label proportionally so all 4 borders fit cleanly
-      const sideMargin = 6;
-      const topMargin = 6;
-      const availW = targetW - (sideMargin * 2);
-      const availH = targetH - bottomMargin - topMargin;
-
-      const scale = Math.min(availW / origW, availH / origH);
-      const scaledW = origW * scale;
-      const scaledH = origH * scale;
-
-      page.scale(scale, scale);
-      page.setSize(targetW, targetH);
-      const offsetX = (targetW - scaledW) / 2;
-      const offsetY = bottomMargin + (availH - scaledH) / 2;
-      page.translateContent(offsetX, offsetY);
+      return;
     }
+
+    // 2. When resizing standard A4/A6 or other non-thermal Bosta PDFs to 75x125mm (212.60 x 354.33 pt):
+    // Scale tightly to fill 98% to 100% of the 212.60 x 354.33 pt page width and height,
+    // leaving only 1-2mm (~3pt) safety margin at the edges.
+    const safetyMargin = 3; // ~1mm safety margin
+    const availW = targetW - (safetyMargin * 2);
+    const availH = targetH - (safetyMargin * 2);
+
+    const scale = Math.min(availW / origW, availH / origH);
+    const scaledW = origW * scale;
+    const scaledH = origH * scale;
+
+    page.scale(scale, scale);
+    page.setSize(targetW, targetH);
+    const offsetX = (targetW - scaledW) / 2;
+    const offsetY = (targetH - scaledH) / 2;
+    page.translateContent(offsetX, offsetY);
   },
 
   /**
@@ -1105,14 +1272,16 @@ const PDFProcessor = {
   },
 
   /**
-   * Generates final sorted PDF (Pure 1:1 binary copy with thermal resize and separators)
-   * Auto-Batching Pick Lists & Blank Separators:
-   * 1. Large orders (3+ pieces): Batched <= 30 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
-   * 2. Two-piece orders (2 pieces): Batched <= 10 pieces. End of each batch: Page A (Pick List) + Page B (Blank Separator)
-   * 3. Single-piece orders (1 piece): NO pick lists inside. Blank separator before carpets.
-   * Stamping Rule:
-   * Stamps small sequential reference box [ #1 ], [ #2 ] onto shipping labels ONLY!
-   * NEVER stamps on blank separators, master manifest, or batch pick-list sheets.
+   * Generates final sorted PDF (Pure 1:1 binary copy with full-bleed thermal resize and separators)
+   * Critical Update #1:
+   * 1. Completely REMOVED small thermal pick-list summary cards ("بطاقة تجهيز المخزن").
+   * 2. PDF ONLY contains sorted Bosta shipping labels and blank white separator pages between major groups:
+   *    - Major Group 1: Large orders (3+ pieces)
+   *    - Blank separator page [212.60, 354.33]
+   *    - Major Group 2: Two-piece orders (2 pieces)
+   *    - Blank separator page [212.60, 354.33]
+   *    - Major Group 3: Single-piece orders (1 piece), with blank separator before carpets section
+   * 3. Sequential reference #X stamped on shipping labels ONLY inside Red Box Zone (never on separators).
    */
   async generateSortedPDF(masterPdfBytes, sortedPages, options = {}, onProgress) {
     const pdfLibModule = typeof PDFLib !== 'undefined' ? PDFLib : (typeof global !== 'undefined' ? global.PDFLib : null);
@@ -1129,7 +1298,7 @@ const PDFProcessor = {
       throw new Error('لا توجد صفحات محددة للتصدير.');
     }
 
-    const enableBatchPickLists = options.enableBatchPickLists !== false && options.insertBlankSeparators !== false;
+    const insertSeparators = options.insertBlankSeparators !== false;
 
     try {
       const safeBuffer = bytes.slice(0);
@@ -1139,67 +1308,47 @@ const PDFProcessor = {
       // Embed standard font for sequential label stamping
       const stampFont = await outDoc.embedFont(pdfLibModule.StandardFonts.HelveticaBold);
 
-      // Prepend Master Manifest summary page if requested
+      // Prepend Master Manifest summary page if explicitly requested
       if (options.insertMasterManifest === true) {
         await this.createMasterManifestSheet(outDoc, sortedPages);
       }
 
-      if (!enableBatchPickLists) {
-        // Simple direct 1:1 binary copy with sequential stamping on shipping labels
-        const sortedIndices = sortedPages.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
-        const copiedPages = await outDoc.copyPages(srcDoc, sortedIndices);
-        for (let i = 0; i < copiedPages.length; i++) {
-          if (onProgress) {
-            onProgress({
-              current: i + 1,
-              total: copiedPages.length,
-              percent: Math.round(((i + 1) / copiedPages.length) * 100),
-              phase: 'تجهيز صفحات الطباعة (ترقيم البوالص ونسخ ثنائي 1:1)'
-            });
-          }
-          await new Promise(r => setTimeout(r, 0));
-          const cp = copiedPages[i];
-          const order = sortedPages[i];
-          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (i + 1);
-
-          // Thermal resize if enabled
-          if (options.thermalResize !== false) {
-            this.applyThermalResize(cp, options);
-          }
-
-          // Stamp sequence number box onto shipping labels ONLY
-          this.stampLabelSequenceNumber(cp, seqNum, stampFont);
-
-          outDoc.addPage(cp);
-        }
-        return await outDoc.save();
-      }
-
-      // Partition sorted pages into groups
+      // Partition sorted pages into major groups
       const largeOrders = [];
       const twoPieceOrders = [];
       const singleOrders = [];
-      const unrecognizedOrders = [];
+      // Partition sorted pages into the exact 8 Main Buckets (+ Bucket 9 for unrecognized)
+      const buckets = {
+        1: [], // Bucket 1: Large Orders (4+ Pieces, sorted descending: 8 -> 7 -> 6 -> 5 -> 4)
+        2: [], // Bucket 2: Three-Piece Orders (3 Pieces without non-pocket rugs)
+        3: [], // Bucket 3: Orders Containing a Regular Prayer Rug WITH Another Product
+        4: [], // Bucket 4: Two-Piece Orders (4A) + Single Regular Prayer Rug at the End of Twos (4B)
+        5: [], // Bucket 5: Single-Piece Women Orders (1 Piece - الحريمي)
+        6: [], // Bucket 6: Single-Piece Kids Orders (1 Piece - الأطفالي)
+        7: [], // Bucket 7: Single-Piece Other Items (Bags/Accessories)
+        8: [], // Bucket 8 (FINAL GROUP AT THE END): Pocket & Waterproof Orders
+        9: []  // Bucket 9: Unrecognized Orders
+      };
 
       for (const p of sortedPages) {
-        if (p.hasRecognizedDescription === false) {
-          unrecognizedOrders.push(p);
-          continue;
+        let b = p.bucket;
+        if (!b) {
+          const bInfo = this.classifyOrderBucket(p);
+          b = bInfo.bucket;
+          p.bucket = b;
+          p.subBucket = bInfo.subBucket;
         }
-        const count = typeof p.piecesCount === 'number' ? p.piecesCount : (parseInt(p.totalPieces, 10) || 1);
-        if (count >= 3) {
-          largeOrders.push(p);
-        } else if (count === 2) {
-          twoPieceOrders.push(p);
+        if (buckets[b]) {
+          buckets[b].push(p);
         } else {
-          singleOrders.push(p);
+          buckets[9].push(p);
         }
       }
 
       let processedCount = 0;
       const totalOrdersToProcess = sortedPages.length;
 
-      // Helper to copy and add orders in an array with sequential label stamp
+      // Helper to copy and add orders with sequential label stamp in the Red Box Zone
       const addOrderLabels = async (ordersList) => {
         if (!ordersList || ordersList.length === 0) return;
         const indices = ordersList.map(p => (typeof p === 'number' ? p : p.originalPageNumber - 1));
@@ -1217,106 +1366,33 @@ const PDFProcessor = {
           await new Promise(r => setTimeout(r, 0));
           const cp = copied[i];
           const order = ordersList[i];
-          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : (processedCount);
+          const seqNum = (typeof order === 'object' && order.newPageNumber) ? order.newPageNumber : processedCount;
 
-          // Thermal resize if enabled
+          // Full-bleed thermal resize if enabled
           if (options.thermalResize !== false) {
             this.applyThermalResize(cp, options);
           }
 
-          // Stamp sequence number box onto shipping labels ONLY
+          // Stamp sequence number box onto shipping labels ONLY (Red Box Zone)
           this.stampLabelSequenceNumber(cp, seqNum, stampFont);
 
           outDoc.addPage(cp);
         }
       };
 
-      // 1. Large Orders (3+ pieces): Batched <= 30 pieces
-      if (largeOrders.length > 0) {
-        const largeBatches = [];
-        let curBatch = [];
-        let curPieces = 0;
+      // Sequentially export buckets 1 to 8 (and 9) with 75x125mm Blank Separator Page between each non-empty bucket
+      let printedAnyBucket = false;
+      for (let b = 1; b <= 9; b++) {
+        const list = buckets[b];
+        if (!list || list.length === 0) continue;
 
-        for (const order of largeOrders) {
-          const pCount = order.piecesCount || order.totalItemsCount || 1;
-          if (curBatch.length > 0 && curPieces + pCount > 30) {
-            largeBatches.push(curBatch);
-            curBatch = [order];
-            curPieces = pCount;
-          } else {
-            curBatch.push(order);
-            curPieces += pCount;
-          }
+        if (insertSeparators && printedAnyBucket) {
+          // 75x125 mm (212.60 x 354.33 pt) Blank Separator Page
+          outDoc.addPage([212.60, 354.33]);
         }
-        if (curBatch.length > 0) largeBatches.push(curBatch);
 
-        for (const batch of largeBatches) {
-          await addOrderLabels(batch);
-          // Insert Page A: Pick list sheet
-          await this.createPickListSheet(outDoc, batch, 'large');
-          // Insert Page B: 100% Blank separator
-          if (options.insertBlankSeparators !== false) {
-            outDoc.addPage([212.60, 354.33]);
-          }
-        }
-      }
-
-      // 2. Two-Piece Orders (2 pieces): Batched <= 10 pieces (every 5 orders = 10 pieces)
-      if (twoPieceOrders.length > 0) {
-        const twoBatches = [];
-        let curBatch2 = [];
-        let curPieces2 = 0;
-
-        for (const order of twoPieceOrders) {
-          const pCount = order.piecesCount || order.totalItemsCount || 2;
-          if (curBatch2.length > 0 && curPieces2 + pCount > 10) {
-            twoBatches.push(curBatch2);
-            curBatch2 = [order];
-            curPieces2 = pCount;
-          } else {
-            curBatch2.push(order);
-            curPieces2 += pCount;
-          }
-        }
-        if (curBatch2.length > 0) twoBatches.push(curBatch2);
-
-        for (const batch of twoBatches) {
-          await addOrderLabels(batch);
-          // Insert Page A: Pick list sheet
-          await this.createPickListSheet(outDoc, batch, 'twopiece');
-          // Insert Page B: 100% Blank separator
-          if (options.insertBlankSeparators !== false) {
-            outDoc.addPage([212.60, 354.33]);
-          }
-        }
-      }
-
-      // 3. Single-Piece Orders (1 piece):
-      // No batch pick-lists. Maintain sequential Excel rank order (Rank 0..N).
-      // Insert a 100% blank separator page before entering carpets/prayer rugs section.
-      if (singleOrders.length > 0) {
-        let carpetSeparatorInserted = false;
-        let nonCarpetPrinted = false;
-
-        for (const order of singleOrders) {
-          const isCarpet = (typeof InventoryParser !== 'undefined' && typeof InventoryParser.isCarpetItem === 'function')
-            ? InventoryParser.isCarpetItem(order)
-            : (order.fullNormalizedDesc || '').includes('سجاد');
-
-          if (options.insertBlankSeparators !== false && !carpetSeparatorInserted && isCarpet && nonCarpetPrinted) {
-            outDoc.addPage([212.60, 354.33]);
-            carpetSeparatorInserted = true;
-          }
-          if (!isCarpet) {
-            nonCarpetPrinted = true;
-          }
-          await addOrderLabels([order]);
-        }
-      }
-
-      // 4. Unrecognized Orders (if any)
-      if (unrecognizedOrders.length > 0) {
-        await addOrderLabels(unrecognizedOrders);
+        await addOrderLabels(list);
+        printedAnyBucket = true;
       }
 
       return await outDoc.save();
@@ -1324,6 +1400,466 @@ const PDFProcessor = {
       console.error('Error generating PDF:', err);
       throw new Error(`فشل إنشاء ملف الـ PDF: ${err.message || err}`);
     }
+  },
+
+  /**
+   * Helper to build aggregated products and customer reference directory data for A4 Pick-List (Strictly NO SKU)
+   */
+  buildA4PickListData(sortedPages) {
+    const totalOrders = sortedPages.length;
+    let totalPieces = 0;
+    const productMap = new Map();
+
+    for (let idx = 0; idx < sortedPages.length; idx++) {
+      const order = sortedPages[idx];
+      const seqNum = order.newPageNumber || (idx + 1);
+      const custName = order.customerName || order.customer || `عميل #${seqNum}`;
+      const orderPieces = typeof order.piecesCount === 'number'
+        ? order.piecesCount
+        : (parseInt(order.totalPieces, 10) || 1);
+      totalPieces += orderPieces;
+
+      const prods = (order.products && Array.isArray(order.products) && order.products.length > 0)
+        ? order.products
+        : ((order.items && Array.isArray(order.items) && order.items.length > 0)
+            ? order.items
+            : [{
+                modelName: order.modelName || 'صنف غير محدد',
+                color: order.color || '',
+                size: order.size || '',
+                qty: orderPieces
+              }]);
+
+      for (const p of prods) {
+        const model = p.modelName || p.title || p.name || order.modelName || 'صنف غير محدد';
+        const color = p.color || '';
+        const size = p.size || '';
+        const qty = p.qty || 1;
+
+        let displayName = p.displayName;
+        if (!displayName) {
+          if (p.title && !color && !size) {
+            displayName = p.title;
+          } else {
+            displayName = `${model}${color ? ` - ${color}` : ''}${size ? ` / ${size}` : ''}`;
+          }
+        }
+        const key = displayName;
+
+        if (!productMap.has(key)) {
+          let shelfRank = 999999;
+          if (typeof ArabicUtils !== 'undefined') {
+            shelfRank = ArabicUtils.getWarehouseRouteRank(model, size);
+          }
+          productMap.set(key, {
+            name: displayName,
+            title: displayName,
+            totalQty: qty,
+            shelfRank,
+            orderRefs: [{ seqNum, customerName: custName, qty }]
+          });
+        } else {
+          const entry = productMap.get(key);
+          entry.totalQty += qty;
+          entry.orderRefs.push({ seqNum, customerName: custName, qty });
+        }
+      }
+    }
+
+    const aggregatedProducts = Array.from(productMap.values());
+    aggregatedProducts.sort((a, b) => {
+      if (a.shelfRank !== b.shelfRank) return a.shelfRank - b.shelfRank;
+      return b.totalQty - a.totalQty;
+    });
+
+    const orderDirectory = sortedPages.map((order, idx) => {
+      const seqNum = order.newPageNumber || (idx + 1);
+      const custName = order.customerName || order.customer || `عميل #${seqNum}`;
+      const pieces = typeof order.piecesCount === 'number'
+        ? order.piecesCount
+        : (parseInt(order.totalPieces, 10) || 1);
+
+      let itemsDesc = '';
+      if (order.products && Array.isArray(order.products) && order.products.length > 0) {
+        itemsDesc = order.products.map(p => `${p.modelName || order.modelName || 'صنف'}${p.color ? ` - ${p.color}` : ''}${p.size ? ` / ${p.size}` : ''} (${p.qty || 1} قطعة)`).join(' + ');
+      } else if (order.items && Array.isArray(order.items) && order.items.length > 0) {
+        itemsDesc = order.items.map(p => `${p.title || p.modelName || p} (${p.qty || 1} قطعة)`).join(' + ');
+      } else {
+        itemsDesc = `${order.modelName || 'صنف غير محدد'}${order.color ? ` - ${order.color}` : ''}${order.size ? ` / ${order.size}` : ''} (${pieces} قطعة)`;
+      }
+
+      return {
+        seqNum,
+        customerName: custName,
+        pieces,
+        itemsDesc
+      };
+    });
+
+    return {
+      totalOrders,
+      totalPieces,
+      aggregatedProducts,
+      orderDirectory
+    };
+  },
+
+  /**
+   * Generates a completely standalone Multi-Page A4 Pick-List & Customer Order Directory PDF (Strictly NO SKU)
+   * Standard A4 portrait: 210mm x 297mm (595.28 x 841.89 pt)
+   */
+  async generateA4PickListPDF(sortedPages, options = {}) {
+    const pdfLibModule = (typeof PDFLib !== 'undefined' ? PDFLib : (typeof window !== 'undefined' ? window.PDFLib : global.PDFLib));
+    if (!pdfLibModule) {
+      throw new Error('مكتبة PDFLib غير محملة');
+    }
+
+    const data = this.buildA4PickListData(sortedPages);
+    const outDoc = await pdfLibModule.PDFDocument.create();
+
+    // Check if browser canvas is available
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const canvasWidth = 1240; // 150 DPI A4 portrait
+      const canvasHeight = 1754;
+      const margin = 50;
+      const contentW = canvasWidth - (margin * 2);
+
+      const canvasPages = [];
+      let currentCanvas = document.createElement('canvas');
+      currentCanvas.width = canvasWidth;
+      currentCanvas.height = canvasHeight;
+      let ctx = currentCanvas.getContext('2d');
+      canvasPages.push(currentCanvas);
+
+      const initCanvasPage = (c, isFirstPage = false) => {
+        const cx = c.getContext('2d');
+        cx.fillStyle = '#ffffff';
+        cx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+        // Header Banner
+        cx.fillStyle = '#0f172a';
+        cx.fillRect(margin, margin, contentW, isFirstPage ? 110 : 70);
+
+        cx.fillStyle = '#2dd4bf';
+        cx.font = 'bold 24px "Alexandria", "Cairo", sans-serif';
+        cx.textAlign = 'center';
+        cx.fillText('📋 كشف تجهيز المخزن وبيان بوالص العملاء (A4)', canvasWidth / 2, margin + (isFirstPage ? 45 : 42));
+
+        if (isFirstPage) {
+          cx.fillStyle = '#ffffff';
+          cx.font = 'bold 15px "Alexandria", "Cairo", sans-serif';
+          cx.fillText(`إجمالي البوالص: ${data.totalOrders} أوردر  |  إجمالي القطع الكلي: ${data.totalPieces} قطعة  |  بدون أكواد SKU`, canvasWidth / 2, margin + 85);
+        }
+      };
+
+      initCanvasPage(currentCanvas, true);
+      let curY = margin + 130;
+
+      const checkPageOverflow = (neededHeight) => {
+        if (curY + neededHeight > canvasHeight - 70) {
+          currentCanvas = document.createElement('canvas');
+          currentCanvas.width = canvasWidth;
+          currentCanvas.height = canvasHeight;
+          ctx = currentCanvas.getContext('2d');
+          initCanvasPage(currentCanvas, false);
+          canvasPages.push(currentCanvas);
+          curY = margin + 85;
+        }
+      };
+
+      // --- SECTION 1: Aggregated Products Pick Table ---
+      checkPageOverflow(70);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(margin, curY, contentW, 36);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 16px "Alexandria", "Cairo", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('📦 أولاً: جدول تجميع المنتجات والكميات المطلوبة (مرتب حسب مسار الرفوف بالمخزن)', canvasWidth - margin - 15, curY + 24);
+      curY += 40;
+
+      // Table Header
+      checkPageOverflow(34);
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(margin, curY, contentW, 30);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+
+      ctx.textAlign = 'center';
+      ctx.fillText('تجهيز', canvasWidth - margin - 25, curY + 20);
+      ctx.fillText('#', canvasWidth - margin - 65, curY + 20);
+
+      ctx.textAlign = 'right';
+      ctx.fillText('اسم المنتج واللون والمقاس المعتمد', canvasWidth - margin - 95, curY + 20);
+
+      ctx.textAlign = 'center';
+      ctx.fillText('إجمالي الكمية', margin + 460, curY + 20);
+
+      ctx.textAlign = 'right';
+      ctx.fillText('أرقام الأوردرات وأسماء العملاء المسحوب لها الصنف', margin + 410, curY + 20);
+      curY += 32;
+
+      // Rows for Section 1
+      for (let idx = 0; idx < data.aggregatedProducts.length; idx++) {
+        const prod = data.aggregatedProducts[idx];
+        const rowH = 36;
+        checkPageOverflow(rowH);
+
+        const isEven = idx % 2 === 0;
+        ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(margin, curY, contentW, rowH);
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(margin, curY, contentW, rowH);
+
+        // Checkbox
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(canvasWidth - margin - 35, curY + (rowH - 18) / 2, 18, 18);
+
+        // Sequence Number
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${idx + 1}`, canvasWidth - margin - 65, curY + rowH * 0.65);
+
+        // Product Name
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+        ctx.textAlign = 'right';
+        let pName = prod.name;
+        if (pName.length > 38) pName = pName.substring(0, 36) + '..';
+        ctx.fillText(pName, canvasWidth - margin - 95, curY + rowH * 0.65);
+
+        // Quantity Badge
+        const qW = 50;
+        const qH = 22;
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(margin + 435, curY + (rowH - qH) / 2, qW, qH, 5);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(`${prod.totalQty}`, margin + 435 + qW / 2, curY + (rowH - qH) / 2 + 16);
+
+        // Orders & Customer Names
+        ctx.fillStyle = '#334155';
+        ctx.font = '11px "Alexandria", "Cairo", sans-serif';
+        ctx.textAlign = 'right';
+        const refsText = prod.orderRefs.map(r => `أوردر #${r.seqNum} (${r.customerName}${r.qty > 1 ? ` - ${r.qty}ق` : ''})`).join(' ، ');
+        let displayRefs = refsText;
+        if (displayRefs.length > 55) displayRefs = displayRefs.substring(0, 53) + '..';
+        ctx.fillText(displayRefs, margin + 410, curY + rowH * 0.65);
+
+        curY += rowH;
+      }
+
+      curY += 25;
+
+      // --- SECTION 2: Order-to-Customer Reference Table ---
+      checkPageOverflow(70);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(margin, curY, contentW, 36);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 16px "Alexandria", "Cairo", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('📑 ثانياً: كشف ربط أرقام الأوردرات بالعملاء ومحتوياتها (دليل البوالص المسلسلة من #1 إلى #N)', canvasWidth - margin - 15, curY + 24);
+      curY += 40;
+
+      // Table Header Section 2
+      checkPageOverflow(34);
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(margin, curY, contentW, 30);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+
+      ctx.textAlign = 'center';
+      ctx.fillText('رقم الأوردر على البوليصة', canvasWidth - margin - 90, curY + 20);
+
+      ctx.textAlign = 'right';
+      ctx.fillText('اسم العميل (من البوليصة)', canvasWidth - margin - 200, curY + 20);
+
+      ctx.textAlign = 'center';
+      ctx.fillText('إجمالي القطع', margin + 570, curY + 20);
+
+      ctx.textAlign = 'right';
+      ctx.fillText('المنتجات المطلوبة داخل الأوردر (بدون SKU)', margin + 510, curY + 20);
+      curY += 32;
+
+      // Rows for Section 2
+      for (let idx = 0; idx < data.orderDirectory.length; idx++) {
+        const ord = data.orderDirectory[idx];
+        const rowH = 34;
+        checkPageOverflow(rowH);
+
+        const isEven = idx % 2 === 0;
+        ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(margin, curY, contentW, rowH);
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(margin, curY, contentW, rowH);
+
+        // Sequence badge
+        ctx.fillStyle = '#e11d48';
+        ctx.beginPath();
+        ctx.roundRect(canvasWidth - margin - 110, curY + (rowH - 22) / 2, 48, 22, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`#${ord.seqNum}`, canvasWidth - margin - 86, curY + (rowH - 22) / 2 + 16);
+
+        // Customer Name
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+        ctx.textAlign = 'right';
+        let cName = ord.customerName;
+        if (cName.length > 25) cName = cName.substring(0, 23) + '..';
+        ctx.fillText(cName, canvasWidth - margin - 160, curY + rowH * 0.65);
+
+        // Total Pieces
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 12px "Alexandria", "Cairo", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${ord.pieces} قطعة`, margin + 570, curY + rowH * 0.65);
+
+        // Products Summary
+        ctx.fillStyle = '#1e293b';
+        ctx.font = '12px "Alexandria", "Cairo", sans-serif';
+        ctx.textAlign = 'right';
+        let iDesc = ord.itemsDesc;
+        if (iDesc.length > 65) iDesc = iDesc.substring(0, 63) + '..';
+        ctx.fillText(iDesc, margin + 510, curY + rowH * 0.65);
+
+        curY += rowH;
+      }
+
+      // Add footers & embed all canvas pages into PDF
+      const totalPages = canvasPages.length;
+      for (let pIdx = 0; pIdx < totalPages; pIdx++) {
+        const c = canvasPages[pIdx];
+        const cx = c.getContext('2d');
+        cx.fillStyle = '#64748b';
+        cx.font = 'bold 13px "Alexandria", "Cairo", sans-serif';
+        cx.textAlign = 'center';
+        cx.fillText(`صفحة ${pIdx + 1} من ${totalPages}  |  منظومة تجهيز المخزن المعتمدة  |  كشف مطبوعات A4 رسمي`, canvasWidth / 2, canvasHeight - 25);
+
+        const dataUrl = c.toDataURL('image/png');
+        const pngImage = await outDoc.embedPng(dataUrl);
+        const pdfPage = outDoc.addPage([595.28, 841.89]);
+        pdfPage.drawImage(pngImage, { x: 0, y: 0, width: 595.28, height: 841.89 });
+      }
+
+      return await outDoc.save();
+    } else {
+      // Node.js fallback (standard vector A4 pages)
+      const page = outDoc.addPage([595.28, 841.89]);
+      const { rgb, StandardFonts } = pdfLibModule;
+      const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
+      page.drawRectangle({ x: 20, y: 841.89 - 80, width: 595.28 - 40, height: 60, color: rgb(0.06, 0.09, 0.16) });
+      page.drawText('WAREHOUSE A4 PICK LIST & CUSTOMER DIRECTORY (NO SKU)', { x: 40, y: 841.89 - 50, size: 14, font, color: rgb(1, 1, 1) });
+      page.drawText(`Orders: ${data.totalOrders} | Total Pieces: ${data.totalPieces} | Products: ${data.aggregatedProducts.length}`, { x: 40, y: 841.89 - 70, size: 10, font, color: rgb(0.2, 0.8, 0.7) });
+      return await outDoc.save();
+    }
+  },
+
+  /**
+   * Opens clean printable HTML view formatted for native browser A4 printing
+   */
+  openA4PrintWindow(sortedPages) {
+    if (typeof window === 'undefined') return;
+    const data = this.buildA4PickListData(sortedPages);
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('يرجى السماح بالنوافذ المنبثقة لفتح كشف الطباعة');
+      return;
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>كشف تجهيز المخزن وبيان العملاء (A4)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-family: 'Alexandria', sans-serif; direction: rtl; margin: 0; padding: 12px; color: #0f172a; font-size: 11px; background: #fff; }
+    .banner { background: #0f172a; color: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center; }
+    .banner h1 { margin: 0 0 6px 0; font-size: 20px; color: #2dd4bf; }
+    .banner-stats { font-size: 13px; font-weight: bold; }
+    .sec-title { background: #1e293b; color: #38bdf8; padding: 8px 12px; font-size: 13px; font-weight: bold; border-radius: 6px; margin: 18px 0 8px 0; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+    th { background: #334155; color: #fff; padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; }
+    td { padding: 6px 8px; border: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:nth-child(even) { background: #f8fafc; }
+    .badge-qty { background: #0f172a; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold; display: inline-block; }
+    .badge-ord { background: #e11d48; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+    .chk { width: 14px; height: 14px; border: 1.5px solid #000; display: inline-block; }
+    @media print { .no-print { display: none; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom: 12px; text-align: left;">
+    <button onclick="window.print()" style="background: #0f766e; color: #fff; border: none; padding: 8px 18px; border-radius: 6px; font-family: inherit; font-weight: bold; cursor: pointer;">🖨️ طباعة الآن (Ctrl + P)</button>
+  </div>
+  <div class="banner">
+    <h1>📋 كشف تجهيز المخزن وبيان بوالص العملاء (A4)</h1>
+    <div class="banner-stats">إجمالي البوالص: ${data.totalOrders} أوردر  |  إجمالي القطع الكلي: ${data.totalPieces} قطعة  |  بدون أكواد SKU</div>
+  </div>
+
+  <div class="sec-title">📦 أولاً: جدول تجميع المنتجات والكميات المطلوبة (مرتب حسب مسار الرفوف بالمخزن)</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 30px; text-align: center;">تجهيز</th>
+        <th style="width: 30px; text-align: center;">#</th>
+        <th>اسم المنتج واللون والمقاس المعتمد</th>
+        <th style="width: 80px; text-align: center;">إجمالي الكمية</th>
+        <th>أرقام الأوردرات وأسماء العملاء المسحوب لها الصنف</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${data.aggregatedProducts.map((p, i) => `
+        <tr>
+          <td style="text-align: center;"><span class="chk"></span></td>
+          <td style="text-align: center;">${i + 1}</td>
+          <td><b>${p.name}</b></td>
+          <td style="text-align: center;"><span class="badge-qty">${p.totalQty}</span></td>
+          <td>${p.orderRefs.map(r => `<span class="badge-ord">#${r.seqNum}</span> ${r.customerName}${r.qty > 1 ? ` (${r.qty}ق)` : ''}`).join(' ، ')}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="sec-title">📑 ثانياً: كشف ربط أرقام الأوردرات بالعملاء ومحتوياتها (دليل البوالص المسلسلة)</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 90px; text-align: center;">رقم الأوردر</th>
+        <th style="width: 140px;">اسم العميل</th>
+        <th style="width: 80px; text-align: center;">إجمالي القطع</th>
+        <th>المنتجات المطلوبة داخل الأوردر (بدون SKU)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${data.orderDirectory.map(o => `
+        <tr>
+          <td style="text-align: center;"><span class="badge-ord">#${o.seqNum}</span></td>
+          <td><b>${o.customerName}</b></td>
+          <td style="text-align: center;"><b>${o.pieces} قطعة</b></td>
+          <td>${o.itemsDesc}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    win.document.write(html);
+    win.document.close();
   },
 
   /**
