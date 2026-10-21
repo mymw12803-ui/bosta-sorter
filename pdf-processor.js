@@ -1404,11 +1404,14 @@ const PDFProcessor = {
   },
 
   /**
-   * Helper to build aggregated products and customer reference directory data for A4 Pick-List (Strictly NO SKU)
-   * GUARANTEES 100% full model name, color, and size with ZERO truncation (no ..)
+   * Builds unified, sequentially-sorted pick-list rows for a single batch (Strictly NO SKU).
+   * Sorts items by their earliest order sequence number (minSeqNum ascending) so order #X never jumps!
    */
   buildA4PickListData(ordersList) {
-    const list = Array.isArray(ordersList) ? ordersList : [];
+    const list = Array.isArray(ordersList) ? [...ordersList] : [];
+    // Ensure orders in the batch are strictly sorted by newPageNumber (#1, #2, #3...)
+    list.sort((a, b) => (a.newPageNumber || 0) - (b.newPageNumber || 0));
+
     const totalOrders = list.length;
     let totalPieces = 0;
     const productMap = new Map();
@@ -1416,11 +1419,7 @@ const PDFProcessor = {
     for (let idx = 0; idx < list.length; idx++) {
       const order = list[idx];
       const seqNum = order.newPageNumber || (idx + 1);
-      const custName = order.customerName || order.customer || `عميل #${seqNum}`;
-      const orderPieces = typeof order.piecesCount === 'number'
-        ? order.piecesCount
-        : (parseInt(order.totalPieces, 10) || 1);
-      totalPieces += orderPieces;
+      const custName = (order.customerName || order.customer || `عميل #${seqNum}`).trim();
 
       const prods = (order.products && Array.isArray(order.products) && order.products.length > 0)
         ? order.products
@@ -1430,17 +1429,21 @@ const PDFProcessor = {
                 modelName: order.modelName || 'صنف غير محدد',
                 color: order.color || '',
                 size: order.size || '',
-                qty: orderPieces
+                qty: typeof order.piecesCount === 'number' ? order.piecesCount : (parseInt(order.totalPieces, 10) || 1)
               }]);
 
-      for (const p of prods) {
-        const model = p.modelName || p.title || p.name || order.modelName || 'صنف غير محدد';
-        const color = p.color || p.normalizedColor || order.color || '';
-        const size = p.size || p.normalizedSize || order.size || '';
-        const qty = p.qty || 1;
+      // Calculate actual pieces of this order from its products
+      const sumProdQty = prods.reduce((acc, p) => acc + (parseInt(p.qty, 10) || 1), 0);
+      const orderPieces = sumProdQty > 0 ? sumProdQty : (typeof order.piecesCount === 'number' ? order.piecesCount : 1);
+      totalPieces += orderPieces;
 
-        // Build 100% full un-truncated product name (Model - Color / Size)
-        let displayName = `${model}`;
+      for (const p of prods) {
+        const model = (p.modelName || p.title || p.name || order.modelName || 'صنف غير محدد').trim();
+        const color = (p.color || p.normalizedColor || order.color || '').trim();
+        const size = (p.size || p.normalizedSize || order.size || '').trim();
+        const qty = parseInt(p.qty, 10) || 1;
+
+        let displayName = model;
         if (color && !displayName.includes(color)) {
           displayName += ` - ${color}`;
         }
@@ -1451,10 +1454,6 @@ const PDFProcessor = {
         const key = displayName;
 
         if (!productMap.has(key)) {
-          let shelfRank = 999999;
-          if (typeof ArabicUtils !== 'undefined') {
-            shelfRank = ArabicUtils.getWarehouseRouteRank(model, size);
-          }
           productMap.set(key, {
             name: displayName,
             title: displayName,
@@ -1462,22 +1461,32 @@ const PDFProcessor = {
             color,
             size,
             totalQty: qty,
-            shelfRank,
+            minSeqNum: seqNum,
             orderRefs: [{ seqNum, customerName: custName, qty }]
           });
         } else {
           const entry = productMap.get(key);
           entry.totalQty += qty;
-          entry.orderRefs.push({ seqNum, customerName: custName, qty });
+          if (seqNum < entry.minSeqNum) entry.minSeqNum = seqNum;
+          // If same order appears twice for same item, merge qty
+          const existingRef = entry.orderRefs.find(r => r.seqNum === seqNum);
+          if (existingRef) {
+            existingRef.qty += qty;
+          } else {
+            entry.orderRefs.push({ seqNum, customerName: custName, qty });
+          }
         }
       }
     }
 
+    // Sort orderRefs inside each product strictly ascending by #X (seqNum)
     const aggregatedProducts = Array.from(productMap.values());
-    aggregatedProducts.sort((a, b) => {
-      if (a.shelfRank !== b.shelfRank) return a.shelfRank - b.shelfRank;
-      return b.totalQty - a.totalQty;
-    });
+    for (const prod of aggregatedProducts) {
+      prod.orderRefs.sort((a, b) => a.seqNum - b.seqNum);
+    }
+
+    // Sort table rows strictly by earliest order number (minSeqNum ascending) so #1, #2, #3 are always in order!
+    aggregatedProducts.sort((a, b) => a.minSeqNum - b.minSeqNum);
 
     const orderDirectory = list.map((order, idx) => {
       const seqNum = order.newPageNumber || (idx + 1);
@@ -1498,24 +1507,11 @@ const PDFProcessor = {
           if (s && !fullStr.includes(s)) fullStr += ` / ${s}`;
           return `${fullStr} (${q} قطعة)`;
         }).join(' + ');
-      } else if (order.items && Array.isArray(order.items) && order.items.length > 0) {
-        itemsDesc = order.items.map(p => `${p.title || p.modelName || p} (${p.qty || 1} قطعة)`).join(' + ');
       } else {
-        const m = order.modelName || 'صنف غير محدد';
-        const c = order.color || '';
-        const s = order.size || '';
-        let fullStr = m;
-        if (c && !fullStr.includes(c)) fullStr += ` - ${c}`;
-        if (s && !fullStr.includes(s)) fullStr += ` / ${s}`;
-        itemsDesc = `${fullStr} (${pieces} قطعة)`;
+        itemsDesc = `${order.modelName || 'صنف'} (${pieces} قطعة)`;
       }
 
-      return {
-        seqNum,
-        customerName: custName,
-        pieces,
-        itemsDesc
-      };
+      return { seqNum, customerName: custName, pieces, itemsDesc };
     });
 
     return {
@@ -1527,122 +1523,101 @@ const PDFProcessor = {
   },
 
   /**
-   * Partitions sorted orders into separate warehouse picking workflow batches
-   * 1. Large Orders (3+ pieces & Rug+Other): batches <= 30 pieces
-   * 2. Two-Piece Orders: batches of 10 orders (~20 pieces, <= 30 pieces)
-   * 3. Single-Piece Women: batches <= 30 pieces
-   * 4. Single-Piece Kids: batches <= 30 pieces
-   * 5. Single-Piece Other: batches <= 30 pieces
-   * 6. Pocket & Waterproof: batches <= 30 pieces
+   * Partitions sortedPages sequentially into strict Piece-Count Batches:
+   * - Large Orders (Buckets 1, 2, 3): STRICT MAX 30 PIECES per batch (<= 30 قطعة)
+   * - Two-Piece Orders (Bucket 4): STRICT MAX 10 PIECES per batch (<= 10 قطع = max 5 orders)
+   * - Single-Piece Orders (Buckets 5, 6, 7, 8): Separated by bucket, STRICT MAX 30 PIECES per batch
    */
   partitionA4Batches(sortedPages) {
     if (!sortedPages || sortedPages.length === 0) return [];
 
-    const largeOrders = [];
-    const twoPieceOrders = [];
-    const womenOrders = [];
-    const kidsOrders = [];
-    const otherOrders = [];
-    const pocketWpOrders = [];
+    // Keep exact sequential order of sortedPages (#1, #2, ... #N)
+    const orderedList = [...sortedPages].sort((a, b) => (a.newPageNumber || 0) - (b.newPageNumber || 0));
 
-    for (const order of sortedPages) {
+    // Group sequentially by major section without scrambling order numbers
+    const sections = [];
+    let currentSection = null;
+
+    const getSectionMeta = (order) => {
       let b = order.bucketId !== undefined ? order.bucketId : (order.bucket !== undefined ? order.bucket : null);
       if (b === null && typeof this.classifyOrderBucket === 'function') {
         const bInfo = this.classifyOrderBucket(order);
-        b = bInfo ? bInfo.bucket : null;
+        b = bInfo ? bInfo.bucket : 1;
       }
-      if (b === null) {
-        const count = order.piecesCount || (order.products ? order.products.reduce((a, b) => a + (b.qty || 1), 0) : 1);
-        if (count >= 3) b = 1;
-        else if (count === 2) b = 4;
-        else b = 5;
+      const pCount = (order.products && order.products.length > 0)
+        ? order.products.reduce((acc, p) => acc + (parseInt(p.qty, 10) || 1), 0)
+        : (typeof order.piecesCount === 'number' ? order.piecesCount : 1);
+
+      if (b === 1 || b === 2 || (b === null && pCount >= 3)) {
+        return { key: 'large', maxPieces: 30, titlePrefix: 'كشف تجهيز الأوردرات الكبرى (حد أقصى 30 قطعة)' };
       }
-
-      if (b === 1 || b === 2 || b === 3) {
-        largeOrders.push(order);
-      } else if (b === 4) {
-        twoPieceOrders.push(order);
-      } else if (b === 5) {
-        womenOrders.push(order);
-      } else if (b === 6) {
-        kidsOrders.push(order);
-      } else if (b === 7) {
-        otherOrders.push(order);
-      } else if (b === 8) {
-        pocketWpOrders.push(order);
-      } else {
-        largeOrders.push(order);
+      if (b === 3) {
+        return { key: 'rug_mixed', maxPieces: 30, titlePrefix: 'كشف تجهيز أوردرات السجاد مع منتج آخر' };
       }
-    }
-
-    const batchList = [];
-
-    const createPiecesBatches = (orders, maxPieces = 30, titlePrefix = '') => {
-      if (!orders || orders.length === 0) return [];
-      const batches = [];
-      let cur = [];
-      let curPieces = 0;
-      for (const ord of orders) {
-        const pCount = ord.piecesCount || (ord.products ? ord.products.reduce((a, b) => a + (b.qty || 1), 0) : 1);
-        if (curPieces + pCount > maxPieces && cur.length > 0) {
-          batches.push({ orders: cur, titlePrefix });
-          cur = [];
-          curPieces = 0;
+      if (b === 4 || (b === null && pCount === 2)) {
+        const sub = order.subBucket || '4A';
+        if (sub === '4B') {
+          return { key: 'rug_single', maxPieces: 10, titlePrefix: 'كشف تجهيز السجاد المفرد (أواخر الاثنينات)' };
         }
-        cur.push(ord);
-        curPieces += pCount;
+        return { key: 'twos', maxPieces: 10, titlePrefix: 'كشف تجهيز أوردرات الاثنينات (10 قطع لكل كشف)' };
       }
-      if (cur.length > 0) {
-        batches.push({ orders: cur, titlePrefix });
+      if (b === 5) {
+        return { key: 'single_women', maxPieces: 30, titlePrefix: 'كشف تجهيز وحائد الحريمي (1 قطعة)' };
       }
-      return batches;
+      if (b === 6) {
+        return { key: 'single_kids', maxPieces: 30, titlePrefix: 'كشف تجهيز وحائد الأطفالي (1 قطعة)' };
+      }
+      if (b === 8) {
+        return { key: 'single_pocket', maxPieces: 30, titlePrefix: 'كشف تجهيز مجموعة الجيب ووتر بروف' };
+      }
+      return { key: 'single_other', maxPieces: 30, titlePrefix: 'كشف تجهيز الأصناف الأخرى (1 قطعة)' };
     };
 
-    // 1. Large Orders: <= 30 pieces per batch
-    if (largeOrders.length > 0) {
-      batchList.push(...createPiecesBatches(largeOrders, 30, 'كشف تجهيز الأوردرات الكبيرة'));
+    for (const ord of orderedList) {
+      const meta = getSectionMeta(ord);
+      if (!currentSection || currentSection.key !== meta.key) {
+        currentSection = { key: meta.key, maxPieces: meta.maxPieces, titlePrefix: meta.titlePrefix, orders: [] };
+        sections.push(currentSection);
+      }
+      currentSection.orders.push(ord);
     }
 
-    // 2. Two-Piece Orders: 10 orders per batch (~20 pieces, <= 30 pieces)
-    if (twoPieceOrders.length > 0) {
-      let cur = [];
+    // Split each section into strict piece-limited batches (<= 30 for Large/Singles, <= 10 for Twos)
+    const finalBatches = [];
+    for (const sec of sections) {
+      let curBatch = [];
       let curPieces = 0;
-      for (const ord of twoPieceOrders) {
-        const pCount = ord.piecesCount || 2;
-        if ((cur.length >= 10 || curPieces + pCount > 30) && cur.length > 0) {
-          batchList.push({ orders: cur, titlePrefix: 'كشف تجهيز أوردرات الاثنينات' });
-          cur = [];
+
+      for (const ord of sec.orders) {
+        const pCount = (ord.products && ord.products.length > 0)
+          ? ord.products.reduce((acc, p) => acc + (parseInt(p.qty, 10) || 1), 0)
+          : (typeof ord.piecesCount === 'number' ? ord.piecesCount : 1);
+
+        // If adding this order exceeds sec.maxPieces (30 or 10), close current batch and start a new one
+        if (curBatch.length > 0 && (curPieces + pCount > sec.maxPieces)) {
+          finalBatches.push({
+            orders: curBatch,
+            titlePrefix: sec.titlePrefix,
+            maxPiecesLimit: sec.maxPieces
+          });
+          curBatch = [];
           curPieces = 0;
         }
-        cur.push(ord);
+
+        curBatch.push(ord);
         curPieces += pCount;
       }
-      if (cur.length > 0) {
-        batchList.push({ orders: cur, titlePrefix: 'كشف تجهيز أوردرات الاثنينات' });
+
+      if (curBatch.length > 0) {
+        finalBatches.push({
+          orders: curBatch,
+          titlePrefix: sec.titlePrefix,
+          maxPiecesLimit: sec.maxPieces
+        });
       }
     }
 
-    // 3. Single-Piece Women: <= 30 pieces
-    if (womenOrders.length > 0) {
-      batchList.push(...createPiecesBatches(womenOrders, 30, 'كشف تجهيز وحائد الحريمي (1 قطعة)'));
-    }
-
-    // 4. Single-Piece Kids: <= 30 pieces
-    if (kidsOrders.length > 0) {
-      batchList.push(...createPiecesBatches(kidsOrders, 30, 'كشف تجهيز وحائد الأطفالي (1 قطعة)'));
-    }
-
-    // 5. Single-Piece Other: <= 30 pieces
-    if (otherOrders.length > 0) {
-      batchList.push(...createPiecesBatches(otherOrders, 30, 'كشف تجهيز الأصناف الأخرى (1 قطعة)'));
-    }
-
-    // 6. Pocket & Waterproof Group: <= 30 pieces
-    if (pocketWpOrders.length > 0) {
-      batchList.push(...createPiecesBatches(pocketWpOrders, 30, 'كشف تجهيز مجموعة الجيب ووتر بروف'));
-    }
-
-    return batchList;
+    return finalBatches;
   },
 
   /**
@@ -1672,9 +1647,10 @@ const PDFProcessor = {
   },
 
   /**
-   * Generates a completely standalone Multi-Page A4 Pick-List & Customer Order Directory PDF (Strictly NO SKU)
-   * Splits into batches with blank white separator pages between batches
-   * Standard A4 portrait: 210mm x 297mm (595.28 x 841.89 pt)
+   * Generates Standalone Multi-Page A4 Pick-List PDF (Strictly NO SKU)
+   * - ONE Unified Table per Batch (Product + Qty + Order #X & Customer Name)
+   * - Huge, crystal-clear fonts (34px - 40px)
+   * - Mandatory Blank White A4 Separator Page after EVERY batch
    */
   async generateA4PickListPDF(sortedPages, options = {}) {
     const pdfLibModule = (typeof PDFLib !== 'undefined' ? PDFLib : (typeof window !== 'undefined' ? window.PDFLib : global.PDFLib));
@@ -1685,19 +1661,17 @@ const PDFProcessor = {
     const batches = this.partitionA4Batches(sortedPages);
     const outDoc = await pdfLibModule.PDFDocument.create();
 
-    // Check if browser canvas is available
     if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
-      const canvasWidth = 1240; // 150 DPI A4 portrait
-      const canvasHeight = 1754;
-      const margin = 40;
-      const contentW = canvasWidth - (margin * 2); // 1160 px
+      const canvasWidth = 1240;  // A4 Portrait width at 150 DPI
+      const canvasHeight = 1754; // A4 Portrait height at 150 DPI
+      const margin = 36;
+      const contentW = canvasWidth - (margin * 2); // 1168 px
 
       for (let bIdx = 0; bIdx < batches.length; bIdx++) {
         const batch = batches[bIdx];
         const data = this.buildA4PickListData(batch.orders);
         const startNum = batch.orders[0].newPageNumber || 1;
         const endNum = batch.orders[batch.orders.length - 1].newPageNumber || batch.orders.length;
-        const batchTitle = `${batch.titlePrefix} - دفعة من أوردر [#${startNum}] إلى [#${endNum}] (إجمالي: ${data.totalPieces} قطعة / ${data.totalOrders} أوردرات)`;
 
         const batchCanvasPages = [];
         let currentCanvas = document.createElement('canvas');
@@ -1706,266 +1680,172 @@ const PDFProcessor = {
         let ctx = currentCanvas.getContext('2d');
         batchCanvasPages.push(currentCanvas);
 
-        let pageIndexInBatch = 1;
-
-        const initCanvasPage = (c, isFirstPage = false) => {
+        const initCanvasPage = (c, isContinuation = false) => {
           const cx = c.getContext('2d');
           cx.fillStyle = '#ffffff';
           cx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-          // Header Banner
+          // Top Dark Header Banner
+          const bannerH = isContinuation ? 95 : 135;
           cx.fillStyle = '#0f172a';
-          cx.fillRect(margin, margin, contentW, isFirstPage ? 110 : 70);
+          cx.fillRect(margin, margin, contentW, bannerH);
 
-          // 18pt Bold Section Header
+          // Title
           cx.fillStyle = '#2dd4bf';
           cx.font = 'bold 36px "Alexandria", "Cairo", sans-serif';
           cx.textAlign = 'center';
-          cx.fillText(batchTitle, canvasWidth / 2, margin + (isFirstPage ? 48 : 45));
+          cx.fillText(`${batch.titlePrefix}${isContinuation ? ' (تابع)' : ''}`, canvasWidth / 2, margin + 48);
 
-          if (isFirstPage) {
-            cx.fillStyle = '#ffffff';
-            cx.font = 'bold 24px "Alexandria", "Cairo", sans-serif';
-            cx.fillText(`دفعة تجهيز مخزني مستقلة  |  بدون أكواد SKU  |  جاهزة للتسليم المباشر للمحطة`, canvasWidth / 2, margin + 90);
-          }
+          // Prominent Range & Total Pieces Summary
+          cx.fillStyle = '#fde047';
+          cx.font = '900 34px "Alexandria", "Cairo", sans-serif';
+          cx.fillText(
+            `من أوردر [ #${startNum} ] إلى [ #${endNum} ]   |   إجمالي القطع في هذا الكشف: ${data.totalPieces} قطعة (${data.totalOrders} أوردرات)`,
+            canvasWidth / 2,
+            margin + (isContinuation ? 82 : 105)
+          );
         };
 
-        initCanvasPage(currentCanvas, true);
-        let curY = margin + 130;
+        initCanvasPage(currentCanvas, false);
+        let curY = margin + 150;
 
-        const checkPageOverflow = (neededHeight) => {
-          if (curY + neededHeight > canvasHeight - 80) {
+        // Unified Table Header Bar
+        const drawTableHeader = (cx, yPos) => {
+          cx.fillStyle = '#1e293b';
+          cx.fillRect(margin, yPos, contentW, 54);
+          cx.fillStyle = '#ffffff';
+          cx.font = 'bold 28px "Alexandria", "Cairo", sans-serif';
+
+          // Columns (Right to Left):
+          // 1. القطعة (اسم الموديل واللون والمقاس): X = [580 .. 1190] (Width = 610px)
+          // 2. عدد القطع: X = [440 .. 580] (Width = 140px)
+          // 3. رقم الأوردر والعميل: X = [36 .. 440] (Width = 404px)
+          cx.textAlign = 'right';
+          cx.fillText('القطعة (الموديل واللون والمقاس الكامل)', canvasWidth - margin - 18, yPos + 36);
+
+          cx.textAlign = 'center';
+          cx.fillText('عدد القطع', margin + 475, yPos + 36);
+
+          cx.textAlign = 'right';
+          cx.fillText('رقم الأوردر (#X) واسم العميل', margin + 395, yPos + 36);
+        };
+
+        drawTableHeader(ctx, curY);
+        curY += 58;
+
+        for (let idx = 0; idx < data.aggregatedProducts.length; idx++) {
+          const prod = data.aggregatedProducts[idx];
+
+          // 1. Wrap Product Name (Large 34px Bold font)
+          ctx.font = 'bold 34px "Alexandria", "Cairo", sans-serif';
+          const nameLines = this.wrapCanvasText(ctx, prod.name, 575);
+
+          // 2. Wrap Order #X & Customer Name lines (Large 30px Bold font, sorted #X ascending)
+          ctx.font = 'bold 30px "Alexandria", "Cairo", sans-serif';
+          const refLines = [];
+          for (const r of prod.orderRefs) {
+            const refStr = `أوردر #${r.seqNum} : ${r.customerName}${r.qty > 1 ? ` (${r.qty} قطع)` : ''}`;
+            const wrappedRef = this.wrapCanvasText(ctx, refStr, 385);
+            refLines.push(...wrappedRef);
+          }
+
+          const lineStep = 42;
+          const maxLines = Math.max(nameLines.length, refLines.length, 1);
+          const rowH = Math.max(70, maxLines * lineStep + 24);
+
+          // Page overflow check
+          if (curY + rowH > canvasHeight - 75) {
             currentCanvas = document.createElement('canvas');
             currentCanvas.width = canvasWidth;
             currentCanvas.height = canvasHeight;
             ctx = currentCanvas.getContext('2d');
-            pageIndexInBatch++;
-            initCanvasPage(currentCanvas, false);
             batchCanvasPages.push(currentCanvas);
-            curY = margin + 85;
+            initCanvasPage(currentCanvas, true);
+            curY = margin + 110;
+            drawTableHeader(ctx, curY);
+            curY += 58;
           }
-        };
 
-        // --- SECTION 1: Aggregated Products Pick Table ---
-        checkPageOverflow(85);
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(margin, curY, contentW, 44);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 32px "Alexandria", "Cairo", sans-serif'; // 16pt - 18pt bold
-        ctx.textAlign = 'right';
-        ctx.fillText('📦 أولاً: جدول تجميع المنتجات والكميات المطلوبة في هذه الدفعة', canvasWidth - margin - 20, curY + 31);
-        curY += 52;
-
-        // Table 1 Header
-        checkPageOverflow(42);
-        ctx.fillStyle = '#334155';
-        ctx.fillRect(margin, curY, contentW, 38);
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 24px "Alexandria", "Cairo", sans-serif'; // 13pt bold
-
-        // Columns layout:
-        // Checkbox: 40px (1160 to 1200)
-        // #: 55px (1105 to 1160)
-        // Product Name & Size: 485px (620 to 1105)
-        // Quantity: 120px (500 to 620)
-        // Order Refs: 460px (40 to 500)
-        ctx.textAlign = 'center';
-        ctx.fillText('تجهيز', canvasWidth - margin - 20, curY + 26);
-        ctx.fillText('#', canvasWidth - margin - 68, curY + 26);
-
-        ctx.textAlign = 'right';
-        ctx.fillText('اسم المنتج واللون والمقاس المعتمد (الاسم الكامل بدون اختصار)', canvasWidth - margin - 105, curY + 26);
-
-        ctx.textAlign = 'center';
-        ctx.fillText('إجمالي الكمية', margin + 520, curY + 26);
-
-        ctx.textAlign = 'right';
-        ctx.fillText('أرقام الأوردرات وأسماء العملاء المسحوب لها الصنف', margin + 450, curY + 26);
-        curY += 40;
-
-        // Rows for Section 1
-        for (let idx = 0; idx < data.aggregatedProducts.length; idx++) {
-          const prod = data.aggregatedProducts[idx];
-          
-          // Wrap product name and refs without ANY truncation
-          ctx.font = 'bold 30px "Alexandria", "Cairo", sans-serif'; // 15pt - 16pt bold
-          const nameLines = this.wrapCanvasText(ctx, prod.name, 470);
-
-          ctx.font = 'bold 24px "Alexandria", "Cairo", sans-serif'; // 13pt - 14pt bold
-          const refsText = prod.orderRefs.map(r => `أوردر #${r.seqNum} (${r.customerName}${r.qty > 1 ? ` - ${r.qty}ق` : ''})`).join(' ، ');
-          const refLines = this.wrapCanvasText(ctx, refsText, 440);
-
-          const maxLines = Math.max(nameLines.length, refLines.length, 1);
-          const rowH = Math.max(54, maxLines * 34 + 18);
-          checkPageOverflow(rowH);
-
-          const isEven = idx % 2 === 0;
-          ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
+          // Row Background & Border
+          ctx.fillStyle = (idx % 2 === 0) ? '#ffffff' : '#f1f5f9';
           ctx.fillRect(margin, curY, contentW, rowH);
 
-          ctx.strokeStyle = '#cbd5e1';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#64748b';
+          ctx.lineWidth = 2;
           ctx.strokeRect(margin, curY, contentW, rowH);
 
-          // Checkbox (22x22 box)
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(canvasWidth - margin - 32, curY + (rowH - 22) / 2, 22, 22);
+          // Vertical Column Dividers
+          ctx.beginPath();
+          ctx.moveTo(margin + 550, curY);
+          ctx.lineTo(margin + 550, curY + rowH);
+          ctx.moveTo(margin + 405, curY);
+          ctx.lineTo(margin + 405, curY + rowH);
+          ctx.stroke();
 
-          // Sequence Number
-          ctx.fillStyle = '#64748b';
-          ctx.font = 'bold 26px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(`${idx + 1}`, canvasWidth - margin - 68, curY + rowH / 2 + 9);
-
-          // Product Name, Color & Size: 15pt - 16pt Bold, multi-line wrapped
+          // Col 1 (Right): Full Product Name + Color + Size (34px Bold)
           ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 34px "Alexandria", "Cairo", sans-serif';
+          ctx.textAlign = 'right';
+          const nameStartY = curY + 40 + Math.max(0, (rowH - nameLines.length * lineStep) / 2 - 10);
+          for (let l = 0; l < nameLines.length; l++) {
+            ctx.fillText(nameLines[l], canvasWidth - margin - 18, nameStartY + l * lineStep);
+          }
+
+          // Col 2 (Center): Quantity Badge (40px Extra Bold)
+          const qW = 90;
+          const qH = 50;
+          const qX = margin + 477 - qW / 2;
+          const qY = curY + (rowH - qH) / 2;
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.roundRect(qX, qY, qW, qH, 10);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '900 38px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${prod.totalQty}`, margin + 477, qY + 38);
+
+          // Col 3 (Left): Order #X & Customer Name (30px Bold, strictly ordered)
+          ctx.fillStyle = '#be123c';
           ctx.font = 'bold 30px "Alexandria", "Cairo", sans-serif';
           ctx.textAlign = 'right';
-          const nameStartY = curY + 30 + (rowH - (nameLines.length * 34)) / 4;
-          for (let l = 0; l < nameLines.length; l++) {
-            ctx.fillText(nameLines[l], canvasWidth - margin - 105, nameStartY + l * 34);
-          }
-
-          // Quantity Badge: 16pt Extra Bold
-          const qW = 66;
-          const qH = 36;
-          ctx.fillStyle = '#0f172a';
-          ctx.beginPath();
-          ctx.roundRect(margin + 520 - qW / 2, curY + (rowH - qH) / 2, qW, qH, 6);
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.textAlign = 'center';
-          ctx.font = '900 32px sans-serif'; // 16pt Extra Bold
-          ctx.fillText(`${prod.totalQty}`, margin + 520, curY + (rowH - qH) / 2 + 27);
-
-          // Orders & Customer Names: 14pt Bold
-          ctx.fillStyle = '#334155';
-          ctx.font = 'bold 24px "Alexandria", "Cairo", sans-serif';
-          ctx.textAlign = 'right';
-          const refStartY = curY + 28 + (rowH - (refLines.length * 30)) / 4;
+          const refStartY = curY + 38 + Math.max(0, (rowH - refLines.length * lineStep) / 2 - 10);
           for (let l = 0; l < refLines.length; l++) {
-            ctx.fillText(refLines[l], margin + 450, refStartY + l * 30);
+            ctx.fillText(refLines[l], margin + 392, refStartY + l * lineStep);
           }
 
           curY += rowH;
         }
 
-        curY += 30;
-
-        // --- SECTION 2: Order-to-Customer Reference Table ---
-        checkPageOverflow(85);
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(margin, curY, contentW, 44);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 32px "Alexandria", "Cairo", sans-serif'; // 16pt - 18pt bold
-        ctx.textAlign = 'right';
-        ctx.fillText(`📑 ثانياً: كشف بوالص العملاء ومحتوياتها في هذه الدفعة (من #${startNum} إلى #${endNum})`, canvasWidth - margin - 20, curY + 31);
-        curY += 52;
-
-        // Table 2 Header
-        checkPageOverflow(42);
-        ctx.fillStyle = '#334155';
-        ctx.fillRect(margin, curY, contentW, 38);
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 24px "Alexandria", "Cairo", sans-serif';
-
-        // Columns layout Table 2:
-        // Order #: 120px (1080 to 1200)
-        // Customer Name: 270px (810 to 1080)
-        // Pieces Count: 130px (680 to 810)
-        // Items Desc: 640px (40 to 680)
-        ctx.textAlign = 'center';
-        ctx.fillText('رقم الأوردر', canvasWidth - margin - 60, curY + 26);
-
-        ctx.textAlign = 'right';
-        ctx.fillText('اسم العميل (من البوليصة)', canvasWidth - margin - 135, curY + 26);
-
-        ctx.textAlign = 'center';
-        ctx.fillText('إجمالي القطع', margin + 705, curY + 26);
-
-        ctx.textAlign = 'right';
-        ctx.fillText('المنتجات المطلوبة داخل الأوردر (بدون SKU)', margin + 630, curY + 26);
-        curY += 40;
-
-        // Rows for Section 2
-        for (let idx = 0; idx < data.orderDirectory.length; idx++) {
-          const ord = data.orderDirectory[idx];
-
-          ctx.font = 'bold 28px "Alexandria", "Cairo", sans-serif'; // 14pt - 15pt bold
-          const descLines = this.wrapCanvasText(ctx, ord.itemsDesc, 620);
-          const custLines = this.wrapCanvasText(ctx, ord.customerName, 260);
-
-          const maxLines = Math.max(descLines.length, custLines.length, 1);
-          const rowH = Math.max(50, maxLines * 34 + 16);
-          checkPageOverflow(rowH);
-
-          const isEven = idx % 2 === 0;
-          ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
-          ctx.fillRect(margin, curY, contentW, rowH);
-
-          ctx.strokeStyle = '#cbd5e1';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(margin, curY, contentW, rowH);
-
-          // Sequence badge #X (Red Pill)
-          const bW = 60;
-          const bH = 32;
-          ctx.fillStyle = '#e11d48';
-          ctx.beginPath();
-          ctx.roundRect(canvasWidth - margin - 60 - bW / 2, curY + (rowH - bH) / 2, bW, bH, 6);
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 24px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(`#${ord.seqNum}`, canvasWidth - margin - 60, curY + (rowH - bH) / 2 + 24);
-
-          // Customer Name: 14pt Bold
+        // Bottom Grand Total Bar for this Batch
+        if (curY + 60 <= canvasHeight - 40) {
           ctx.fillStyle = '#0f172a';
-          ctx.font = 'bold 28px "Alexandria", "Cairo", sans-serif';
-          ctx.textAlign = 'right';
-          const custStartY = curY + 28 + (rowH - (custLines.length * 32)) / 4;
-          for (let l = 0; l < custLines.length; l++) {
-            ctx.fillText(custLines[l], canvasWidth - margin - 135, custStartY + l * 32);
-          }
-
-          // Total Pieces: 14pt Bold
-          ctx.fillStyle = '#334155';
-          ctx.font = 'bold 26px "Alexandria", "Cairo", sans-serif';
+          ctx.fillRect(margin, curY + 8, contentW, 50);
+          ctx.fillStyle = '#fde047';
+          ctx.font = '900 32px "Alexandria", "Cairo", sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText(`${ord.pieces} قطعة`, margin + 705, curY + rowH / 2 + 9);
-
-          // Products Summary: 15pt Bold without any truncation
-          ctx.fillStyle = '#1e293b';
-          ctx.font = 'bold 28px "Alexandria", "Cairo", sans-serif';
-          ctx.textAlign = 'right';
-          const descStartY = curY + 28 + (rowH - (descLines.length * 32)) / 4;
-          for (let l = 0; l < descLines.length; l++) {
-            ctx.fillText(descLines[l], margin + 630, descStartY + l * 32);
-          }
-
-          curY += rowH;
+          ctx.fillText(
+            `إجمالي القطع المطلوبة في هذا الكشف: ${data.totalPieces} قطعة  |  من أوردر #${startNum} إلى #${endNum}`,
+            canvasWidth / 2,
+            curY + 43
+          );
         }
 
-        // Add footers & embed canvas pages of this batch into PDF
+        // Embed rendered batch pages into A4 PDF
         for (let pIdx = 0; pIdx < batchCanvasPages.length; pIdx++) {
           const c = batchCanvasPages[pIdx];
-          const cx = c.getContext('2d');
-          cx.fillStyle = '#64748b';
-          cx.font = 'bold 22px "Alexandria", "Cairo", sans-serif';
-          cx.textAlign = 'center';
-          cx.fillText(`دفعة ${bIdx + 1} من ${batches.length}  |  صفحة ${pIdx + 1} من ${batchCanvasPages.length}  |  منظومة تجهيز المستودع المعتمدة`, canvasWidth / 2, canvasHeight - 25);
-
           const dataUrl = c.toDataURL('image/png');
           const pngImage = await outDoc.embedPng(dataUrl);
           const pdfPage = outDoc.addPage([595.28, 841.89]);
           pdfPage.drawImage(pngImage, { x: 0, y: 0, width: 595.28, height: 841.89 });
         }
 
-        // Insert Blank White Separator Page (ورقة بيضاء فاصلة) after each batch
+        // MANDATORY: Insert a 100% Blank White A4 Separator Page after EVERY batch
         const blankPage = outDoc.addPage([595.28, 841.89]);
         blankPage.drawRectangle({
-          x: 0, y: 0, width: 0.01, height: 0.01, opacity: 0
+          x: 0, y: 0, width: 1, height: 1,
+          color: pdfLibModule.rgb(1, 1, 1), opacity: 0
         });
       }
 
@@ -1985,7 +1865,7 @@ const PDFProcessor = {
 
         // Blank separator page
         const blank = outDoc.addPage([595.28, 841.89]);
-        blank.drawRectangle({ x: 0, y: 0, width: 0.01, height: 0.01, opacity: 0 });
+        blank.drawRectangle({ x: 0, y: 0, width: 1, height: 1, color: rgb(1, 1, 1), opacity: 0 });
       }
 
       return await outDoc.save();
@@ -1994,7 +1874,7 @@ const PDFProcessor = {
 
   /**
    * Opens clean printable HTML view formatted for native browser A4 printing
-   * Rendered with exact warehouse batches and large fonts
+   * Rendered with ONE unified table per batch (Product + Qty + Order #X & Customer Name) and blank separators
    */
   openA4PrintWindow(sortedPages) {
     if (typeof window === 'undefined') return;
@@ -2010,32 +1890,32 @@ const PDFProcessor = {
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <title>كشف تجهيز المخزن وبيان العملاء (A4)</title>
+  <title>كشف تجهيز المخزن الموحد (A4)</title>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
-    @page { size: A4 portrait; margin: 10mm; }
-    body { font-family: 'Alexandria', sans-serif; direction: rtl; margin: 0; padding: 12px; color: #0f172a; font-size: 13px; background: #fff; }
-    .batch-container { page-break-after: always; margin-bottom: 24px; }
-    .blank-separator-page { page-break-after: always; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .banner { background: #0f172a; color: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center; }
-    .banner h1 { margin: 0 0 6px 0; font-size: 22px; color: #2dd4bf; font-weight: bold; }
-    .banner-stats { font-size: 15px; font-weight: bold; }
-    .sec-title { background: #1e293b; color: #38bdf8; padding: 10px 14px; font-size: 16px; font-weight: bold; border-radius: 6px; margin: 18px 0 10px 0; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; word-break: break-word; }
-    th { background: #334155; color: #fff; padding: 8px 10px; border: 1px solid #cbd5e1; text-align: right; font-size: 14px; }
-    td { padding: 8px 10px; border: 1px solid #cbd5e1; vertical-align: middle; }
-    tr:nth-child(even) { background: #f8fafc; }
-    .prod-name { font-size: 15px; font-weight: bold; color: #0f172a; }
-    .badge-qty { background: #0f172a; color: #fff; padding: 4px 10px; border-radius: 6px; font-weight: 900; font-size: 16px; display: inline-block; }
-    .badge-ord { background: #e11d48; color: #fff; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 14px; }
-    .cust-name { font-size: 14px; font-weight: bold; color: #0f172a; }
-    .chk { width: 18px; height: 18px; border: 2px solid #000; display: inline-block; }
+    @page { size: A4 portrait; margin: 8mm; }
+    body { font-family: 'Alexandria', sans-serif; direction: rtl; margin: 0; padding: 10px; color: #0f172a; font-size: 14px; background: #fff; }
+    .batch-container { page-break-after: always; margin-bottom: 20px; }
+    .blank-separator-page { page-break-after: always; min-height: 98vh; display: flex; align-items: center; justify-content: center; }
+    .banner { background: #0f172a; color: #fff; border-radius: 8px; padding: 14px; margin-bottom: 12px; text-align: center; }
+    .banner h1 { margin: 0 0 6px 0; font-size: 24px; color: #2dd4bf; font-weight: 900; }
+    .banner-stats { font-size: 18px; font-weight: 900; color: #fde047; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 14px; }
+    th { background: #1e293b; color: #fff; padding: 10px 8px; border: 2px solid #64748b; font-size: 16px; font-weight: bold; }
+    td { padding: 10px 8px; border: 2px solid #cbd5e1; vertical-align: middle; }
+    tr:nth-child(even) { background: #f1f5f9; }
+    .chk { width: 22px; height: 22px; border: 2px solid #0f172a; border-radius: 4px; display: inline-block; }
+    .prod-name { font-size: 18px; font-weight: 900; color: #0f172a; line-height: 1.4; }
+    .badge-qty { background: #0f172a; color: #fff; padding: 6px 14px; border-radius: 8px; font-weight: 900; font-size: 20px; display: inline-block; }
+    .order-refs { font-size: 15px; font-weight: bold; color: #be123c; line-height: 1.5; }
+    .badge-ord { background: #be123c; color: #fff; padding: 3px 8px; border-radius: 6px; font-weight: 900; font-size: 14px; margin-left: 4px; }
+    .total-bar { background: #0f172a; color: #fde047; font-size: 16px; font-weight: 900; text-align: center; padding: 10px; border-radius: 6px; margin-top: 8px; }
     @media print { .no-print { display: none; } body { padding: 0; } }
   </style>
 </head>
 <body>
   <div class="no-print" style="margin-bottom: 16px; text-align: left;">
-    <button onclick="window.print()" style="background: #0f766e; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-family: inherit; font-size: 14px; font-weight: bold; cursor: pointer;">🖨️ طباعة الآن (Ctrl + P)</button>
+    <button onclick="window.print()" style="background: #0f766e; color: #fff; border: none; padding: 10px 22px; border-radius: 6px; font-family: inherit; font-size: 15px; font-weight: bold; cursor: pointer;">🖨️ طباعة الآن (Ctrl + P)</button>
   </div>
   ${batches.map((batch, bIdx) => {
     const data = this.buildA4PickListData(batch.orders);
@@ -2044,55 +1924,36 @@ const PDFProcessor = {
     return `
     <div class="batch-container">
       <div class="banner">
-        <h1>${batch.titlePrefix} - دفعة من أوردر [#${startNum}] إلى [#${endNum}]</h1>
-        <div class="banner-stats">إجمالي البوالص: ${data.totalOrders} أوردر  |  إجمالي القطع: ${data.totalPieces} قطعة  |  بدون أكواد SKU</div>
+        <h1>${batch.titlePrefix}</h1>
+        <div class="banner-stats">من أوردر [ #${startNum} ] إلى [ #${endNum} ] | إجمالي القطع: ${data.totalPieces} قطعة (${data.totalOrders} أوردرات)</div>
       </div>
 
-      <div class="sec-title">📦 أولاً: جدول تجميع المنتجات والكميات المطلوبة في هذه الدفعة</div>
       <table>
         <thead>
           <tr>
-            <th style="width: 35px; text-align: center;">تجهيز</th>
-            <th style="width: 35px; text-align: center;">#</th>
-            <th>اسم المنتج واللون والمقاس المعتمد (بدون اختصار)</th>
-            <th style="width: 95px; text-align: center;">إجمالي الكمية</th>
-            <th>أرقام الأوردرات وأسماء العملاء المسحوب لها الصنف</th>
+            <th style="width: 50px; text-align: center;">تجهيز</th>
+            <th style="text-align: right;">القطعة (الموديل واللون والمقاس الكامل)</th>
+            <th style="width: 100px; text-align: center;">عدد القطع</th>
+            <th style="width: 42%; text-align: right;">رقم الأوردر (#X) واسم العميل</th>
           </tr>
         </thead>
         <tbody>
-          ${data.aggregatedProducts.map((p, i) => `
+          ${data.aggregatedProducts.map((p) => `
             <tr>
               <td style="text-align: center;"><span class="chk"></span></td>
-              <td style="text-align: center;"><b>${i + 1}</b></td>
               <td class="prod-name">${p.name}</td>
               <td style="text-align: center;"><span class="badge-qty">${p.totalQty}</span></td>
-              <td>${p.orderRefs.map(r => `<span class="badge-ord">#${r.seqNum}</span> <b>${r.customerName}</b>${r.qty > 1 ? ` (${r.qty}ق)` : ''}`).join(' ، ')}</td>
+              <td class="order-refs">
+                ${p.orderRefs.map(r => `<div><span class="badge-ord">#${r.seqNum}</span> <b>${r.customerName}</b>${r.qty > 1 ? ` (${r.qty} قطع)` : ''}</div>`).join('')}
+              </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
 
-      <div class="sec-title">📑 ثانياً: كشف ربط أرقام الأوردرات بالعملاء ومحتوياتها في هذه الدفعة</div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 100px; text-align: center;">رقم الأوردر</th>
-            <th style="width: 160px;">اسم العميل</th>
-            <th style="width: 90px; text-align: center;">إجمالي القطع</th>
-            <th>المنتجات المطلوبة داخل الأوردر (بدون SKU)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.orderDirectory.map(o => `
-            <tr>
-              <td style="text-align: center;"><span class="badge-ord">#${o.seqNum}</span></td>
-              <td class="cust-name">${o.customerName}</td>
-              <td style="text-align: center;"><b>${o.pieces} قطعة</b></td>
-              <td class="prod-name">${o.itemsDesc}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+      <div class="total-bar">
+        إجمالي القطع المطلوبة في هذا الكشف: ${data.totalPieces} قطعة | من أوردر #${startNum} إلى #${endNum}
+      </div>
     </div>
 
     <!-- Blank Separator Page -->
