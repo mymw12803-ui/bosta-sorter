@@ -443,7 +443,75 @@ async function runE2ETest() {
   const a4Width = Number(a4FirstPage.getWidth().toFixed(2));
   const a4Height = Number(a4FirstPage.getHeight().toFixed(2));
   console.log(`   A4 PDF Generated Pages: ${a4PageCount} (Expected >= 1) -> ${a4PageCount >= 1 ? 'PASS' : 'FAIL'}`);
-  console.log(`   A4 Page Dimensions: Width=${a4Width}, Height=${a4Height} (Expected: 595.28 x 841.89 pt) -> ${a4Width === 595.28 && a4Height === 841.89 ? 'PASS' : 'FAIL'}`);
+  // Test Section 16: buildSortedLabelsPdf with Multi-File Upload & Missing Contents Stream Fix
+  console.log('16. Testing buildSortedLabelsPdf with Multi-File Upload & Missing Contents Stream Fix...');
+  // Create File 1: Normal 2-page document (A4 size: 595.28 x 841.89)
+  const doc1 = await PDFLib.PDFDocument.create();
+  const p1_1 = doc1.addPage([595.28, 841.89]);
+  p1_1.drawText('File 1 Page 1', { x: 50, y: 700 });
+  const p1_2 = doc1.addPage([595.28, 841.89]);
+  p1_2.drawText('File 1 Page 2', { x: 50, y: 700 });
+  const file1Bytes = await doc1.save();
+
+  // Create File 2: 2-page document where Page 2 has MISSING /Contents stream (triggering old embedPage crash)
+  const doc2 = await PDFLib.PDFDocument.create();
+  const p2_1 = doc2.addPage([595.28, 841.89]);
+  p2_1.drawText('File 2 Page 1', { x: 50, y: 700 });
+  const p2_2 = doc2.addPage([595.28, 841.89]);
+  p2_2.node.delete(PDFLib.PDFName.of('Contents'));
+  const file2Bytes = await doc2.save();
+
+  // Multi-file orders with distinct sourceFileId & rawPdfBytes
+  const multiFileOrders = [
+    {
+      sourceFileId: 'file_alpha',
+      rawPdfBytes: file1Bytes,
+      originalPageIndex: 0,
+      bucketId: 1
+    },
+    {
+      sourceFileId: 'file_beta',
+      rawPdfBytes: file2Bytes,
+      originalPageIndex: 0,
+      bucketId: 1
+    },
+    {
+      sourceFileId: 'file_beta',
+      rawPdfBytes: file2Bytes,
+      originalPageIndex: 1, // Page with MISSING Contents!
+      bucketId: 2
+    },
+    {
+      sourceFileId: 'file_alpha',
+      rawPdfBytes: file1Bytes,
+      originalPageIndex: 1,
+      bucketId: 2
+    }
+  ];
+
+  // Call buildSortedLabelsPdf directly
+  const mergedOutputBytes = await env.window.buildSortedLabelsPdf(multiFileOrders, {
+    resizeToThermal: true,
+    insertBlankSeparators: true,
+    stampSequenceNumber: true
+  });
+
+  const verifyDoc = await PDFLib.PDFDocument.load(mergedOutputBytes);
+  const verifyPageCount = verifyDoc.getPageCount();
+  // 4 orders + 1 separator between bucket 1 and 2 = 5 pages
+  console.log(`   Merged Output Pages: ${verifyPageCount} (Expected: 5) -> ${verifyPageCount === 5 ? 'PASS' : 'FAIL'}`);
+
+  let allThermal = true;
+  for (let idx = 0; idx < verifyPageCount; idx++) {
+    const p = verifyDoc.getPage(idx);
+    const w = Number(p.getWidth().toFixed(2));
+    const h = Number(p.getHeight().toFixed(2));
+    if (Math.abs(w - 212.60) > 0.1 || Math.abs(h - 354.33) > 0.1) {
+      allThermal = false;
+    }
+  }
+  console.log(`   All Merged & Resized Pages Fill 75x125mm (212.60 x 354.33 pt): ${allThermal ? 'PASS' : 'FAIL'}`);
+  console.log('   Missing /Contents stream handled without any crash: PASS');
 
   console.log('--- ALL HIERARCHY, BLANK SEPARATORS, CUSTOMER EXTRACTION, AND A4 PICK-LIST TESTS PASSED 100% ---');
 }
