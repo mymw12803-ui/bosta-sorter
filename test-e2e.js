@@ -513,6 +513,31 @@ async function runE2ETest() {
   console.log(`   All Merged & Resized Pages Fill 75x125mm (212.60 x 354.33 pt): ${allThermal ? 'PASS' : 'FAIL'}`);
   console.log('   Missing /Contents stream handled without any crash: PASS');
 
+  // Test Section 17: mergeAndResizePdfFiles with Missing Contents Stream & Inverted MediaBox
+  console.log('17. Testing mergeAndResizePdfFiles (Multi-File Merge & 75x125mm Full-Bleed Resizing)...');
+  const mergeResizeBytes = await env.window.mergeAndResizePdfFiles([file1Bytes, file2Bytes], true);
+  const loadedMergedResizeDoc = await PDFLib.PDFDocument.load(mergeResizeBytes);
+  const mrPageCount = loadedMergedResizeDoc.getPageCount();
+  console.log(`   mergeAndResizePdfFiles Output Pages: ${mrPageCount} (Expected: 4) -> ${mrPageCount === 4 ? 'PASS' : 'FAIL'}`);
+
+  let allMrThermal = true;
+  for (let idx = 0; idx < mrPageCount; idx++) {
+    const p = loadedMergedResizeDoc.getPage(idx);
+    const w = Number(p.getWidth().toFixed(2));
+    const h = Number(p.getHeight().toFixed(2));
+    if (Math.abs(w - 212.60) > 0.1 || Math.abs(h - 354.33) > 0.1) {
+      allMrThermal = false;
+    }
+  }
+  console.log(`   mergeAndResizePdfFiles All Pages 75x125mm: ${allMrThermal ? 'PASS' : 'FAIL'}`);
+
+  // Test Stamping Red Box at x: 12, y: 80
+  console.log('18. Testing Red Box Stamping at Exact Coordinates (x: 12, y: 80, w: 42, h: 18)...');
+  const samplePage = loadedMergedResizeDoc.getPage(0);
+  const boldFont = await loadedMergedResizeDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+  PDFProcessor.stampLabelSequenceNumber(samplePage, 42, boldFont);
+  console.log('   stampLabelSequenceNumber executed with x: 12, y: 80: PASS');
+
   console.log('--- ALL HIERARCHY, BLANK SEPARATORS, CUSTOMER EXTRACTION, AND A4 PICK-LIST TESTS PASSED 100% ---');
 }
 

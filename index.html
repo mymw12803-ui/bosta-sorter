@@ -42,6 +42,70 @@
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
   <!-- pdf-lib for vector-perfect PDF generation & thermal resizing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <!-- Global PDF-Lib Safeguards (Auto-heal missing Contents & inverted MediaBox) -->
+  <script>
+    (function patchPdfLibSafeguards() {
+      const applyPatch = () => {
+        if (typeof PDFLib === 'undefined' || !PDFLib.PDFDocument || PDFLib.PDFDocument.__patched) return;
+        PDFLib.PDFDocument.__patched = true;
+
+        const origAddPage = PDFLib.PDFDocument.prototype.addPage;
+        PDFLib.PDFDocument.prototype.addPage = function(...args) {
+          const page = origAddPage.apply(this, args);
+          try {
+            if (page && page.node && !page.node.Contents()) {
+              page.drawRectangle({ x: 0, y: 0, width: 0.01, height: 0.01, opacity: 0 });
+            }
+          } catch (e) {}
+          return page;
+        };
+
+        const origInsertPage = PDFLib.PDFDocument.prototype.insertPage;
+        PDFLib.PDFDocument.prototype.insertPage = function(...args) {
+          const page = origInsertPage.apply(this, args);
+          try {
+            if (page && page.node && !page.node.Contents()) {
+              page.drawRectangle({ x: 0, y: 0, width: 0.01, height: 0.01, opacity: 0 });
+            }
+          } catch (e) {}
+          return page;
+        };
+
+        const healPageForEmbed = (page) => {
+          if (!page || !page.node) return;
+          if (!page.node.Contents()) {
+            page.drawRectangle({ x: 0, y: 0, width: 0.01, height: 0.01, opacity: 0 });
+          }
+        };
+
+        const origEmbedPage = PDFLib.PDFDocument.prototype.embedPage;
+        PDFLib.PDFDocument.prototype.embedPage = async function(page, boundingBox, transformationMatrix) {
+          try {
+            healPageForEmbed(page);
+            if (page && page.node && !boundingBox) {
+              const mb = page.node.MediaBox();
+              const x1 = mb.get(0).asNumber(), y1 = mb.get(1).asNumber();
+              const x2 = mb.get(2).asNumber(), y2 = mb.get(3).asNumber();
+              if (y1 > y2) {
+                boundingBox = { left: Math.min(x1, x2), bottom: 0, right: Math.max(x1, x2), top: Math.abs(y1 - y2) };
+              }
+            }
+          } catch (e) {}
+          return origEmbedPage.call(this, page, boundingBox, transformationMatrix);
+        };
+
+        const origEmbedPages = PDFLib.PDFDocument.prototype.embedPages;
+        PDFLib.PDFDocument.prototype.embedPages = async function(pages, boundingBoxes, transformationMatrices) {
+          if (Array.isArray(pages)) pages.forEach(healPageForEmbed);
+          return origEmbedPages.call(this, pages, boundingBoxes, transformationMatrices);
+        };
+      };
+
+      applyPatch();
+      window.addEventListener('DOMContentLoaded', applyPatch);
+      setTimeout(applyPatch, 500);
+    })();
+  </script>
   <!-- pdf.js for Arabic text extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <!-- SheetJS (xlsx) for inventory export reading -->
@@ -972,7 +1036,7 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              <span>📄 تحميل كشف التجهيز والعملاء (A4 PDF منفصل - بدون SKU)</span>
+              <span>📄 تحميل كشف التجهيز والعملاء (ملف A4 منفصل - بدون SKU)</span>
             </button>
 
             <!-- Top Download Action (Full Labels PDF) -->
@@ -1036,7 +1100,7 @@
       <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
         <button id="download-a4-sticky-btn" class="w-full sm:w-auto px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-xs shadow-xl shadow-teal-950/40 transition flex items-center justify-center gap-1.5">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-          <span>كشف التجهيز والعملاء (A4 - بدون SKU)</span>
+          <span>📄 تحميل كشف التجهيز والعملاء (ملف A4 منفصل - بدون SKU)</span>
         </button>
 
         <button id="download-sticky-btn" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-sm shadow-xl shadow-rose-950/40 transition flex items-center justify-center gap-2">
